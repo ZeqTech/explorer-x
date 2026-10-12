@@ -15,7 +15,7 @@
   const loadPrefs = () => {
     try { const p = JSON.parse(localStorage.getItem('explorerx') || '{}'); for (const k of PREF_KEYS) if (k in p) state[k] = p[k]; } catch { /* ignore */ }
   };
-  const fileUrl = (p) => 'file:///' + encodeURI(p.replace(/\\/g, '/').replace(/^\//, '')).replace(/[#?]/g, (c) => '%' + c.charCodeAt(0).toString(16));
+  const fileUrl = (p) => api.fileUrl(p);
   const IMG = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif']);
   const applyLayout = () => {
     document.documentElement.style.setProperty('--icon', state.icon + 'px');
@@ -372,7 +372,7 @@
     $('sort').value = state.sortKey;
     $('view').textContent = 'View: ' + (state.view === 'details' ? 'Details' : 'Icons');
     await renderNav();
-    const start = new URLSearchParams(location.search).get('path');
-    await go(start || await api.home());
+    await go(api.startPath() || await api.home());
+    api.onOpenPath((p) => go(p));
   })();
 })();

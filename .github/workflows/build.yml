@@ -24,18 +24,21 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - run: npm test
+      # Version comes from rust-toolchain.toml; the Mac job also needs both Apple targets.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.0"
+          targets: ${{ matrix.target == 'mac' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
       - name: Build
         shell: bash
-        run: sh ./build.sh ${{ matrix.target }}
+        run: ./build.sh ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:
           name: explorer-x-${{ matrix.target }}
-          path: |
-            dist/*.exe
-            dist/*.dmg
-            dist/*.zip
+          path: dist/*
           if-no-files-found: error
 
   release:

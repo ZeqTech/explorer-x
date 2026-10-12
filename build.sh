@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Build Explorer X installers.
+# Build Explorer X (Tauri) installers.
 #   ./build.sh            build for the current OS
-#   ./build.sh win        Windows installer + portable .exe  (output in dist/)
-#   ./build.sh mac        macOS .dmg + .zip (x64 + arm64)    (must run on a Mac)
+#   ./build.sh win        Windows installer + portable .exe   (output in dist/)
+#   ./build.sh mac        macOS universal .dmg + .zip          (must run on a Mac)
 #   ./build.sh all        win, plus mac when running on a Mac
 set -euo pipefail
-export CSC_IDENTITY_AUTO_DISCOVERY=false  # no code signing
-cd "$(dirname "${BASH_SOURCE[0]}")"
+cd "$(dirname "${BASH_SOURCE[0]:-$0}")"
 
 case "$(uname -s)" in
   Darwin) HOST=mac ;;
@@ -24,10 +23,17 @@ if ! command -v node >/dev/null; then
 fi
 command -v node >/dev/null || {
   echo "Node.js not found on PATH. Install it from https://nodejs.org (or run 'nvm use <version>'), then retry." >&2
-  echo "PATH is: $PATH" >&2
   exit 1
 }
 echo "Using node $(node -v) from $(command -v node)"
+
+# Rust (rustup puts cargo in ~/.cargo/bin). rust-toolchain.toml pins the version.
+export PATH="$HOME/.cargo/bin:$PATH"
+command -v cargo >/dev/null || {
+  echo "Rust not found. Install it from https://rustup.rs, then retry." >&2
+  exit 1
+}
+echo "Using $(rustc -V)"
 
 # On Windows, npm/npx are bash scripts whose "#!/usr/bin/env bash" can resolve to the WSL
 # launcher; the .cmd shims avoid that.
@@ -38,18 +44,28 @@ echo "==> Installing dependencies"
 echo "==> Running tests"
 "$NPM" test
 
+BUNDLE=src-tauri/target/release/bundle
+rm -rf dist && mkdir -p dist
+
 build_win() {
-  echo "==> Building Windows (NSIS installer + portable)"
-  "$NPX" electron-builder --win nsis portable --x64 --publish never
+  echo "==> Building Windows (NSIS installer + portable exe)"
+  "$NPX" tauri build --bundles nsis
+  cp "$BUNDLE"/nsis/*.exe dist/
+  VERSION=$(node -p "require('./package.json').version")
+  cp src-tauri/target/release/explorer-x.exe "dist/Explorer X ${VERSION} portable.exe"
 }
 
 build_mac() {
   if [ "$HOST" != "mac" ]; then
-    echo "!! macOS builds require running on a Mac (dmg tooling and code signing are macOS-only). Skipping." >&2
+    echo "!! macOS builds require running on a Mac. Skipping." >&2
     return 1
   fi
-  echo "==> Building macOS (dmg + zip, x64 + arm64)"
-  "$NPX" electron-builder --mac dmg zip --x64 --arm64 --publish never
+  echo "==> Building macOS (universal dmg + zip)"
+  rustup target add aarch64-apple-darwin x86_64-apple-darwin
+  "$NPX" tauri build --target universal-apple-darwin --bundles app,dmg
+  M=src-tauri/target/universal-apple-darwin/release/bundle
+  cp "$M"/dmg/*.dmg dist/
+  ditto -c -k --keepParent "$M/macos/Explorer X.app" "dist/Explorer X.app.zip"
 }
 
 case "$TARGET" in
@@ -59,5 +75,5 @@ case "$TARGET" in
   *)    echo "Usage: $0 [win|mac|all]" >&2; exit 2 ;;
 esac
 
-echo "==> Done. Artifacts:"
-ls -1 dist 2>/dev/null | grep -Ei '\.(exe|dmg|zip)$' || true
+echo "==> Done. Artifacts in dist/:"
+ls -1 dist

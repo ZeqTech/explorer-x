@@ -60,3 +60,7 @@ build/
 # --- General ---
 .DS_Store
 .idea/
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/

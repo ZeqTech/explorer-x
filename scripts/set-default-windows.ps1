@@ -19,7 +19,9 @@ if ($Undo) {
 }
 
 if (-not $ExePath) {
-  $ExePath = "$env:LOCALAPPDATA\Programs\explorer-x\Explorer X.exe"
+  # Where the Tauri installer puts it (per-user install), then an alternate location.
+  $ExePath = @("$env:LOCALAPPDATA\Explorer X\explorer-x.exe", "$env:LOCALAPPDATA\Programs\Explorer X\explorer-x.exe") |
+    Where-Object { Test-Path $_ } | Select-Object -First 1
 }
 if (-not (Test-Path $ExePath)) {
   Write-Error "Explorer X not found at '$ExePath'. Install it first or pass -ExePath."

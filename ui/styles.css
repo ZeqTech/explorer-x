@@ -5,8 +5,7 @@
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body { display: flex; flex-direction: column; background: var(--bg); color: var(--fg); font: 13px system-ui, -apple-system, "Segoe UI", sans-serif; user-select: none; }
-body.mac #toolbar { padding-left: 80px; -webkit-app-region: drag; }
-body.mac #toolbar > * { -webkit-app-region: no-drag; }
+body.mac #toolbar { padding-left: 80px; }
 button, select, input { font: inherit; color: inherit; }
 button, select { background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 4px 8px; cursor: pointer; }
 button:hover, select:hover { background: var(--hover); }

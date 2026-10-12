@@ -5,7 +5,8 @@
 **A fast, familiar file explorer for Windows and macOS: one app, one set of shortcuts, native feel on both.**
 
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0067c0)
-![Electron](https://img.shields.io/badge/built%20with-Electron-47848f)
+![Tauri](https://img.shields.io/badge/built%20with-Tauri%202-ffc131)
+![Size](https://img.shields.io/badge/installer-~1%20MB-brightgreen)
 ![Status](https://img.shields.io/badge/status-early%20release-orange)
 
 </div>
@@ -38,20 +39,23 @@ Explorer X takes the workflow of Windows File Explorer (breadcrumb address bar, 
 
 Grab the latest installer from the [Releases](../../releases) page:
 
-- **Windows:** `Explorer X Setup x.y.z.exe` (installer) or `Explorer X x.y.z.exe` (portable, no install)
-- **macOS:** `.dmg` (Intel and Apple Silicon)
+- **Windows:** `Explorer X_x.y.z_x64-setup.exe` (installer, about 1 MB) or `Explorer X x.y.z portable.exe` (no install)
+- **macOS:** `.dmg` (universal: Intel and Apple Silicon)
+
+Windows needs the Microsoft WebView2 runtime, which is already included in Windows 10 (recent updates) and 11.
 
 > Builds are not code-signed yet. On Windows, SmartScreen may show an "unknown publisher" warning (*More info → Run anyway*). On macOS, right-click the app and choose **Open** the first time.
 
 ### Run from source
 
-Requires [Node.js](https://nodejs.org) 20 or newer.
+Requires [Node.js](https://nodejs.org) 20+ and [Rust](https://rustup.rs) (the repo pins the version in `rust-toolchain.toml`). On Windows you also need the Visual Studio **C++ build tools**; see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ```bash
 git clone <this-repo-url>
 cd explorer-x
 npm install
-npm start
+npm start      # runs the app with hot reload of the UI
+npm test       # Rust unit tests for the filesystem layer
 ```
 
 ## ⌨️ Keyboard shortcuts
@@ -75,7 +79,7 @@ npm start
 
 ```bash
 ./build.sh win    # Windows installer + portable .exe  -> dist/
-./build.sh mac    # macOS .dmg + .zip (must run on a Mac)
+./build.sh mac    # macOS universal .dmg + .zip (must run on a Mac)
 ./build.sh all    # everything the current machine can build
 ```
 
@@ -97,7 +101,7 @@ Finder (macOS) and `explorer.exe` (Windows) remain the system shells, but Explor
 ```
 ```powershell
 # Windows (current user only); undo with -Undo
-.scriptsset-default-windows.ps1
+.\scripts\set-default-windows.ps1
 ```
 
 Some entry points (desktop double-clicks on macOS, Win+E on Windows) are controlled by the OS and will still use the built-in app.
@@ -105,18 +109,22 @@ Some entry points (desktop double-clicks on macOS, Win+E on Windows) are control
 ## 🧱 Project structure
 
 ```
-src/
-├── main.js         Electron main process and IPC handlers
-├── preload.js      Sandboxed bridge exposed to the UI
-├── fs-service.js   Filesystem logic (unit tested)
-├── renderer.js     UI behavior
-├── index.html      Layout
-└── styles.css      Theme and styling
-test/               Filesystem service tests  (npm test)
-build.sh            Cross-platform packaging script
+ui/                     Frontend (plain HTML/CSS/JS, no build step)
+├── index.html
+├── styles.css
+├── renderer.js         UI behavior
+└── bridge.js           Connects the UI to the Rust commands
+src-tauri/
+├── src/lib.rs          Tauri app: windows, commands, folder-open handling
+├── src/fs_service.rs   Filesystem logic (unit tested)
+├── tauri.conf.json     App, security and bundle config
+├── Info.plist          Lets macOS offer Explorer X as a folder handler
+└── capabilities/       Permissions granted to the UI
+scripts/                Default-folder-app helpers, icon generator
+build.sh                Cross-platform packaging script
 ```
 
-The renderer runs sandboxed with context isolation and a strict Content Security Policy; all filesystem access goes through a small, explicit IPC API.
+The UI runs in the system webview (WebView2 on Windows, WKWebView on macOS) with a strict Content Security Policy. All filesystem access goes through a small set of Rust commands.
 
 ## 🗺️ Roadmap
 

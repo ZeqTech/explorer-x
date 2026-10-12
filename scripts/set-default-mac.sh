@@ -7,7 +7,7 @@ set -euo pipefail
 [ "$(uname -s)" = Darwin ] || { echo "This script is for macOS." >&2; exit 1; }
 command -v duti >/dev/null || { echo "duti is required:  brew install duti" >&2; exit 1; }
 
-APP_ID="com.explorerx.app"
+APP_ID="com.explorerx.desktop"
 if [ "${1:-}" = undo ]; then
   duti -s com.apple.finder public.folder all
   echo "Folders now open in Finder."
