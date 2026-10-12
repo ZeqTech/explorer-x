@@ -1,5 +1,6 @@
 import { fmtSize, fmtDate, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves } from './format.js';
 import { UndoStack } from './undo.js';
+import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
 
 (() => {
   const api = window.fsapi;
@@ -30,6 +31,9 @@ import { UndoStack } from './undo.js';
   const parentOf = (p) => parentOfSep(p, state.sep);
   const joinPath = (d, n) => joinPathSep(d, n, state.sep);
   const toast = (msg) => { $('selinfo').textContent = msg; };
+  // A message that survives the next redraw (used when the caller refreshes right after).
+  let pendingToast = null;
+  const toastAfterRender = (msg) => { pendingToast = msg; };
   const guard = (fn) => async (...a) => { try { return await fn(...a); } catch (e) { toast('Error: ' + e.message); } };
 
   // ---- undo / redo ------------------------------------------------------
@@ -53,14 +57,39 @@ import { UndoStack } from './undo.js';
   });
 
   // Copies or moves `srcs` into `destDir` and records how to undo it. Resolves to [{from, to}].
+  const activeOps = new Map(); // opId -> progress dialog
+  api.onProgress((p) => { const d = activeOps.get(p.opId); if (d) d.update(p); });
+
   async function transfer(kind, srcs, destDir) {
+    const verb = kind === 'move' ? 'Moving' : 'Copying';
     const label = (kind === 'move' ? 'Move ' : 'Copy ') + plural(srcs.length, 'item');
-    let done = await api[kind](srcs, destDir);
+
+    // Names that already exist in the destination: ask what to do (Replace / Skip / Keep both).
+    const conflicts = await api.findConflicts(srcs, destDir);
+    let resolutions = null;
+    if (conflicts.length) {
+      resolutions = await conflictDialog(conflicts, baseName(destDir));
+      if (!resolutions) { toastAfterRender('Cancelled'); return []; }
+    }
+
+    const opId = api.newOpId();
+    const dlg = progressDialog({ title: verb + ' ' + plural(srcs.length, 'item') + '\u2026', onCancel: () => api.cancelOp(opId) });
+    activeOps.set(opId, dlg);
+    let done;
+    try {
+      done = await api[kind](srcs, destDir, resolutions, opId);
+    } catch (e) {
+      if (e.message === 'Cancelled') { toastAfterRender('Cancelled'); return []; }
+      throw e;
+    } finally {
+      activeOps.delete(opId);
+      dlg.close();
+    }
     if (!done.length) return done;
     if (kind === 'move') {
       record({ label, undo: () => api.renameMany(invertMoves(done)), redo: () => api.renameMany(done) });
     } else {
-      record({ label, undo: () => api.trash(done.map((m) => m.to)), redo: async () => { done = await api.copy(srcs, destDir); } });
+      record({ label, undo: () => api.trash(done.map((m) => m.to)), redo: async () => { done = await api.copy(srcs, destDir, resolutions); } });
     }
     return done;
   }
@@ -219,6 +248,7 @@ import { UndoStack } from './undo.js';
 
   function updateStatus() {
     $('count').textContent = shown.length + ' item' + (shown.length === 1 ? '' : 's');
+    if (pendingToast) { $('selinfo').textContent = pendingToast; pendingToast = null; return; }
     const n = state.sel.size;
     if (!n) { $('selinfo').textContent = ''; return; }
     const bytes = shown.filter((e) => state.sel.has(e.path) && !e.isDir).reduce((s, e) => s + e.size, 0);
@@ -253,8 +283,8 @@ import { UndoStack } from './undo.js';
   });
   const doPaste = guard(async () => {
     const c = await api.clipboardRead(); if (!c || !c.paths.length) return;
-    await transfer(c.cut ? 'move' : 'copy', c.paths, state.cwd);
-    if (c.cut) await api.clipboardWrite([], false);
+    const done = await transfer(c.cut ? 'move' : 'copy', c.paths, state.cwd);
+    if (c.cut && done.length) await api.clipboardWrite([], false); // a cancelled cut stays on the clipboard
     state.cut = new Set(); await refresh();
   });
   const doDelete = guard(async () => {
@@ -399,6 +429,7 @@ import { UndoStack } from './undo.js';
   // ---- keyboard ---------------------------------------------------------
   let typed = '', typedTimer = 0;
   document.addEventListener('keydown', (ev) => {
+    if (dialogOpen()) return;
     if (ev.target.tagName === 'INPUT' && ev.target.type !== 'range') return;
     if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey && ev.key !== ' ') {
       typed += ev.key.toLowerCase(); clearTimeout(typedTimer); typedTimer = setTimeout(() => { typed = ''; }, 800);
