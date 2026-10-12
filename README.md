@@ -1,8 +1,8 @@
 <div align="center">
 
-# 📁 Explorer X
+# Explorer X
 
-**A fast, familiar file explorer for Windows and macOS: one app, one set of shortcuts, native feel on both.**
+A file explorer for Windows and macOS.
 
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0067c0)
 ![Tauri](https://img.shields.io/badge/built%20with-Tauri%202-ffc131)
@@ -12,51 +12,37 @@
 
 </div>
 
-Explorer X takes the workflow of Windows File Explorer (breadcrumb address bar, sortable details view, quick access sidebar, drag-and-drop) and makes it work the same way on a Mac, with Cmd shortcuts, Trash and Finder integration where it matters.
+Explorer X follows the workflow of Windows File Explorer: a breadcrumb address bar, a sortable details view, a quick-access sidebar and drag-and-drop. It runs the same way on a Mac, with Cmd shortcuts and Trash and Finder integration. Linux builds also work.
 
 <!-- Add a screenshot here once you have one:
 ![Explorer X](docs/screenshot.png)
 -->
 
-## ✨ Features
+## Features
 
-| | |
-|---|---|
-| 🧭 **Navigation** | Back / forward / up, clickable breadcrumbs, type any path (`~` works) |
-| 🗂️ **Tabs** | Each tab has its own folder and history. Middle-click a folder to open it in a new tab |
-| 📌 **Pinned folders** | Pin any folder to the sidebar from the right-click menu |
-| ↔️ **Resizable sidebar** | Drag the divider; double-click to reset. Width is remembered |
-| 🖼️ **Views** | Details or icon view, sortable columns, adjustable icon size |
-| 🎨 **Native icons** | The same file and folder icons your OS shows, plus image thumbnails in icon view |
-| 👁️ **Preview pane** | Text, images, audio, video and folder summaries without opening anything (`Alt+P`) |
-| ℹ️ **Properties** | Size (including folder totals), dates, attributes, location (`Alt+Enter`) |
-| 🖱️ **Right-click menus** | Open, open in terminal, copy path / name, duplicate, pin, properties, show in Explorer / Finder, on files, folders, empty space and the sidebar |
-| ✂️ **File operations** | Cut, copy, paste, rename, new folder / file, drag-and-drop (hold Ctrl/Alt to copy) |
-| ↩️ **Undo / redo** | Rename, create, move, copy and delete can all be undone (`Ctrl+Z` / `Ctrl+Y`) |
-| ⚠️ **Conflict prompts** | Replace, Skip or Keep both when a name already exists, with "do this for all" |
-| ⏳ **Progress & cancel** | Big copies and moves show a progress bar and can be cancelled cleanly |
-| 🗑️ **Safe delete** | Items go to the Recycle Bin / Trash, and "Replace" sends the old item there too |
-| 🔎 **Search** | Recursive filename search in the current folder |
-| ⌨️ **Type to select** | Start typing to jump to a file |
-| 🌗 **Light & dark** | Follows your OS theme |
-| 💾 **Remembers you** | Pins, view, sort order, icon size and sidebar width persist between launches |
+Navigation uses back, forward and up buttons, a clickable breadcrumb bar, and typed paths (`~` works). Each tab keeps its own folder and history, and middle-clicking a folder opens it in a new tab. You can pin any folder to the sidebar from the right-click menu and drag the sidebar divider to resize it. Double-click the divider to reset it.
 
-## 🚀 Getting started
+Files show in a details or icon view with sortable columns and an adjustable icon size. The icons are the ones your OS uses, and image files get thumbnails in icon view. The preview pane (`Alt+P`) shows text, images, audio, video or a folder summary without opening anything. The Properties dialog (`Alt+Enter`) shows size, folder totals, dates, attributes and location.
+
+Right-click menus on files, folders, empty space and the sidebar offer Open, Open in terminal, Copy path, Copy name, Duplicate, Pin, Properties, and Show in Explorer or Finder. You can cut, copy, paste, rename, create folders and files, and drag and drop (hold Ctrl or Alt to copy). When a name already exists you choose Replace, Skip or Keep both, with a "do this for all" option. Large copies and moves show a progress bar and can be cancelled.
+
+Deleting sends items to the Recycle Bin or Trash, and Replace sends the old item there too. Rename, create, move, copy and delete can be undone with `Ctrl+Z` and redone with `Ctrl+Y`.
+
+There is also a recursive filename search of the current folder, and typing a few letters jumps to a matching file. The app follows your OS light or dark theme, and it remembers pins, view, sort order, icon size and sidebar width between launches.
+
+## Getting started
 
 ### Download
 
-Grab the latest installer from the [Releases](../../releases) page:
-
-- **Windows:** `Explorer X_x.y.z_x64-setup.exe` (installer, about 1 MB) or `Explorer X x.y.z portable.exe` (no install)
-- **macOS:** `.dmg` (universal: Intel and Apple Silicon)
+Get the latest installer from the [Releases](../../releases) page. On Windows, `Explorer X_x.y.z_x64-setup.exe` is the installer (about 1 MB) and `Explorer X x.y.z portable.exe` runs without installing. On macOS there is a `.dmg`, universal for Intel and Apple Silicon.
 
 Windows needs the Microsoft WebView2 runtime, which is already included in Windows 10 (recent updates) and 11.
 
-> Builds are not code-signed yet. On Windows, SmartScreen may show an "unknown publisher" warning (*More info → Run anyway*). On macOS, right-click the app and choose **Open** the first time.
+> Builds are not code-signed yet. On Windows, SmartScreen may show an "unknown publisher" warning (More info, then Run anyway). On macOS, right-click the app and choose Open the first time.
 
 ### Run from source
 
-Requires [Node.js](https://nodejs.org) 20+ and [Rust](https://rustup.rs) (the repo pins the version in `rust-toolchain.toml`). On Windows you also need the Visual Studio **C++ build tools**; see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
+You need [Node.js](https://nodejs.org) 20 or newer and [Rust](https://rustup.rs). The repo pins the Rust version in `rust-toolchain.toml`. On Windows you also need the Visual Studio C++ build tools; see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ```bash
 git clone <this-repo-url>
@@ -66,7 +52,7 @@ npm start      # runs the app with hot reload of the UI
 npm test       # Rust tests (filesystem layer) + UI unit tests
 ```
 
-## ⌨️ Keyboard shortcuts
+## Keyboard shortcuts
 
 | Action | Windows | macOS |
 | --- | --- | --- |
@@ -90,7 +76,7 @@ npm test       # Rust tests (filesystem layer) + UI unit tests
 | Refresh | `F5` | `F5` |
 | Icon size | `Ctrl+Scroll` | `Cmd+Scroll` |
 
-## 🛠️ Building installers
+## Building installers
 
 ```bash
 ./build.sh win    # Windows installer + portable .exe  -> dist/
@@ -98,15 +84,15 @@ npm test       # Rust tests (filesystem layer) + UI unit tests
 ./build.sh all    # everything the current machine can build
 ```
 
-macOS packages can only be built on macOS. The included GitHub Actions workflow
-([`build.yml`](.github/workflows/build.yml)) builds **both** platforms on every push.
+macOS packages can only be built on macOS. The GitHub Actions workflow
+([`build.yml`](.github/workflows/build.yml)) builds both platforms on every push.
 Push a version tag to publish a release with the installers attached:
 
 ```bash
 git tag v0.1.0 && git push --tags
 ```
 
-## 📂 Use it as your default folder app
+## Use it as your default folder app
 
 Finder (macOS) and `explorer.exe` (Windows) remain the system shells, but Explorer X can be the app that opens folders:
 
@@ -119,9 +105,9 @@ Finder (macOS) and `explorer.exe` (Windows) remain the system shells, but Explor
 .\scripts\set-default-windows.ps1
 ```
 
-Some entry points (desktop double-clicks on macOS, Win+E on Windows) are controlled by the OS and will still use the built-in app.
+Some entry points, such as desktop double-clicks on macOS and Win+E on Windows, are controlled by the OS and still open the built-in app.
 
-## 🧱 Project structure
+## Project structure
 
 ```
 ui/                     Frontend (plain HTML/CSS/JS, no build step)
@@ -145,7 +131,7 @@ build.sh                Cross-platform packaging script
 
 The UI runs in the system webview (WebView2 on Windows, WKWebView on macOS) with a strict Content Security Policy. All filesystem access goes through a small set of Rust commands.
 
-## 🗺️ Roadmap
+## Roadmap
 
 - [x] Tabs
 - [x] Native OS file icons (Windows and macOS; Linux uses built-in icons for now)
@@ -156,17 +142,17 @@ The UI runs in the system webview (WebView2 on Windows, WKWebView on macOS) with
 
 Known limitations, all good first issues:
 
-- Undoing a **delete** works on Windows and Linux. macOS has no public API to restore from the Trash, so use *Put Back* in Finder there.
-- Undoing a copy that used **Replace** removes the new copy, but the replaced original stays in the Trash.
+- Undoing a delete works on Windows and Linux. macOS has no public API to restore from the Trash, so use Put Back in Finder there.
+- Undoing a copy that used Replace removes the new copy, but the replaced original stays in the Trash.
 - Cancelling a multi-item copy keeps the items that already finished, and they cannot be undone as a group.
 - Folder name conflicts replace rather than merge.
 - Linux has no native icons yet (the icon library needs the main thread there).
-- Drag-and-drop *between* windows and tab reordering are not implemented.
+- Drag-and-drop between windows and tab reordering are not implemented.
 
-## 🤝 Contributing
+## Contributing
 
-Explorer X is fully open source and contributions are very welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started, and please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Found a security problem? See [SECURITY.md](SECURITY.md).
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started and follow the [Code of Conduct](CODE_OF_CONDUCT.md). For security problems, see [SECURITY.md](SECURITY.md).
 
-## 📄 License
+## License
 
-[MIT](LICENSE) © Explorer X contributors. Use it, change it, ship it.
+[MIT](LICENSE) © Explorer X contributors.
