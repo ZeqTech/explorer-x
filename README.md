@@ -23,13 +23,19 @@ Explorer X takes the workflow of Windows File Explorer (breadcrumb address bar, 
 | | |
 |---|---|
 | 🧭 **Navigation** | Back / forward / up, clickable breadcrumbs, type any path (`~` works) |
+| 🗂️ **Tabs** | Each tab has its own folder and history. Middle-click a folder to open it in a new tab |
 | 📌 **Pinned folders** | Pin any folder to the sidebar from the right-click menu |
 | ↔️ **Resizable sidebar** | Drag the divider; double-click to reset. Width is remembered |
 | 🖼️ **Views** | Details or icon view, sortable columns, adjustable icon size |
-| 🔍 **Thumbnails** | Image previews right in the icon view |
-| 🖱️ **Right-click menus** | Open, open in terminal, copy path / name, duplicate, pin, show in Explorer / Finder, on files, folders, empty space and the sidebar |
+| 🎨 **Native icons** | The same file and folder icons your OS shows, plus image thumbnails in icon view |
+| 👁️ **Preview pane** | Text, images, audio, video and folder summaries without opening anything (`Alt+P`) |
+| ℹ️ **Properties** | Size (including folder totals), dates, attributes, location (`Alt+Enter`) |
+| 🖱️ **Right-click menus** | Open, open in terminal, copy path / name, duplicate, pin, properties, show in Explorer / Finder, on files, folders, empty space and the sidebar |
 | ✂️ **File operations** | Cut, copy, paste, rename, new folder / file, drag-and-drop (hold Ctrl/Alt to copy) |
-| 🗑️ **Safe delete** | Items go to the Recycle Bin / Trash, never permanently deleted |
+| ↩️ **Undo / redo** | Rename, create, move, copy and delete can all be undone (`Ctrl+Z` / `Ctrl+Y`) |
+| ⚠️ **Conflict prompts** | Replace, Skip or Keep both when a name already exists, with "do this for all" |
+| ⏳ **Progress & cancel** | Big copies and moves show a progress bar and can be cancelled cleanly |
+| 🗑️ **Safe delete** | Items go to the Recycle Bin / Trash, and "Replace" sends the old item there too |
 | 🔎 **Search** | Recursive filename search in the current folder |
 | ⌨️ **Type to select** | Start typing to jump to a file |
 | 🌗 **Light & dark** | Follows your OS theme |
@@ -57,7 +63,7 @@ git clone <this-repo-url>
 cd explorer-x
 npm install
 npm start      # runs the app with hot reload of the UI
-npm test       # Rust unit tests for the filesystem layer
+npm test       # Rust tests (filesystem layer) + UI unit tests
 ```
 
 ## ⌨️ Keyboard shortcuts
@@ -69,8 +75,14 @@ npm test       # Rust unit tests for the filesystem layer
 | Focus address bar | `Ctrl+L` | `Cmd+L` |
 | Search | `Ctrl+F` | `Cmd+F` |
 | Show hidden files | `Ctrl+H` | `Cmd+H` |
+| Undo / Redo | `Ctrl+Z` / `Ctrl+Y` | `Cmd+Z` / `Cmd+Shift+Z` |
 | Rename | `F2` | `F2` |
 | Copy path | `Ctrl+Shift+C` | `Cmd+Shift+C` |
+| Properties | `Alt+Enter` | `Cmd+I` |
+| Preview pane | `Alt+P` | `Alt+P` |
+| New tab | `Ctrl+T` | `Cmd+T` |
+| Close tab | `Ctrl+W` | `Ctrl+W` (`Cmd+W` closes the window) |
+| Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Delete / Move to Trash | `Delete` | `Cmd+Backspace` |
 | Open | `Enter` | `Enter` or `Cmd+↓` |
 | Up one folder | `Alt+↑` or `Backspace` | `Cmd+↑` |
@@ -115,8 +127,12 @@ Some entry points (desktop double-clicks on macOS, Win+E on Windows) are control
 ui/                     Frontend (plain HTML/CSS/JS, no build step)
 ├── index.html
 ├── styles.css
-├── renderer.js         UI behavior
-└── bridge.js           Connects the UI to the Rust commands
+├── renderer.js         UI behavior: navigation, tabs, selection, menus, undo wiring
+├── dialogs.js          Conflict, progress and properties dialogs
+├── undo.js             Undo / redo history
+├── format.js           Pure helpers (sizes, paths, icon keys)
+├── bridge.js           Connects the UI to the Rust commands
+└── test/               Node unit tests for the pure modules
 src-tauri/
 ├── src/lib.rs          Tauri app: windows, commands, folder-open handling
 ├── src/fs_service.rs   Filesystem logic (unit tested)
@@ -131,12 +147,21 @@ The UI runs in the system webview (WebView2 on Windows, WKWebView on macOS) with
 
 ## 🗺️ Roadmap
 
-- [ ] Tabs
-- [ ] Native OS file icons
-- [ ] Preview pane and Properties dialog
-- [ ] Undo / redo for move, rename and delete
-- [ ] Copy progress and name-conflict prompts
-- [ ] Code signing and auto-update
+- [x] Tabs
+- [x] Native OS file icons (Windows and macOS; Linux uses built-in icons for now)
+- [x] Preview pane and Properties dialog
+- [x] Undo / redo for rename, create, move, copy and delete
+- [x] Copy progress and name-conflict prompts
+- [ ] Code signing and auto-update (needs signing keys; see [docs/RELEASING.md](docs/RELEASING.md))
+
+Known limitations, all good first issues:
+
+- Undoing a **delete** works on Windows and Linux. macOS has no public API to restore from the Trash, so use *Put Back* in Finder there.
+- Undoing a copy that used **Replace** removes the new copy, but the replaced original stays in the Trash.
+- Cancelling a multi-item copy keeps the items that already finished, and they cannot be undone as a group.
+- Folder name conflicts replace rather than merge.
+- Linux has no native icons yet (the icon library needs the main thread there).
+- Drag-and-drop *between* windows and tab reordering are not implemented.
 
 ## 🤝 Contributing
 
