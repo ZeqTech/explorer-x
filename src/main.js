@@ -43,8 +43,29 @@ handle('clipboardRead', () => {
   try { const j = JSON.parse(clipboard.readText()); return j.explorerX ? j : null; } catch { return null; }
 });
 
+// ---- opening folders from the OS (default folder handler) -------------
+const fs = require('fs');
+const dirOnly = (p) => { try { return fs.statSync(p).isDirectory() ? p : null; } catch { return null; } };
+// First folder path on a command line (skips flags; dev runs have an extra "." argument).
+const folderFromArgv = (argv) => argv.slice(app.isPackaged ? 1 : 2).map((a) => (a.startsWith('-') ? null : dirOnly(a))).find(Boolean) || null;
+
+let ready = false;
+const pending = [];
+const openFolder = (p) => (ready ? createWindow(p) : pending.push(p));
+
+// macOS delivers "open this folder" requests (including before launch finishes) via open-file.
+app.on('open-file', (e, p) => { e.preventDefault(); const d = dirOnly(p); if (d) openFolder(d); });
+
+// One running instance; later launches (e.g. Windows folder handler) open a new window in it.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) { app.quit(); }
+else app.on('second-instance', (_e, argv) => createWindow(folderFromArgv(argv) || undefined));
+
 app.whenReady().then(() => {
-  createWindow();
+  if (!gotLock) return;
+  ready = true;
+  const initial = [folderFromArgv(process.argv), ...pending].filter(Boolean);
+  if (initial.length) initial.forEach((p) => createWindow(p)); else createWindow();
   app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
 });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

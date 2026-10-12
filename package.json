@@ -40,7 +40,19 @@
         "dmg",
         "zip"
       ],
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Folder",
+            "CFBundleTypeRole": "Viewer",
+            "LSItemContentTypes": [
+              "public.folder"
+            ],
+            "LSHandlerRank": "Default"
+          }
+        ]
+      }
     }
   }
 }

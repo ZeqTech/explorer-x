@@ -40,7 +40,7 @@ echo "==> Running tests"
 
 build_win() {
   echo "==> Building Windows (NSIS installer + portable)"
-  "$NPX" electron-builder --win nsis portable --x64
+  "$NPX" electron-builder --win nsis portable --x64 --publish never
 }
 
 build_mac() {
@@ -49,7 +49,7 @@ build_mac() {
     return 1
   fi
   echo "==> Building macOS (dmg + zip, x64 + arm64)"
-  "$NPX" electron-builder --mac dmg zip --x64 --arm64
+  "$NPX" electron-builder --mac dmg zip --x64 --arm64 --publish never
 }
 
 case "$TARGET" in

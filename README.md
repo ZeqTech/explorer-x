@@ -87,6 +87,21 @@ Push a version tag to publish a release with the installers attached:
 git tag v0.1.0 && git push --tags
 ```
 
+## 📂 Use it as your default folder app
+
+Finder (macOS) and `explorer.exe` (Windows) remain the system shells, but Explorer X can be the app that opens folders:
+
+```bash
+# macOS: needs duti (brew install duti); undo with the "undo" argument
+./scripts/set-default-mac.sh
+```
+```powershell
+# Windows (current user only); undo with -Undo
+.scriptsset-default-windows.ps1
+```
+
+Some entry points (desktop double-clicks on macOS, Win+E on Windows) are controlled by the OS and will still use the built-in app.
+
 ## 🧱 Project structure
 
 ```
