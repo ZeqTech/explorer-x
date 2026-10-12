@@ -1,15 +1,19 @@
-//! Filesystem operations behind the UI. Pure std, so they are unit-testable without Tauri.
+//! Filesystem operations behind the UI. Pure std (plus `trash` for recoverable replace),
+//! so everything here is unit-testable without Tauri.
 
-use serde::Serialize;
-use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-type Res<T> = Result<T, String>;
+pub type Res<T> = Result<T, String>;
 
 fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
+
+// ---- data types -----------------------------------------------------------
 
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -38,6 +42,79 @@ pub struct Hit {
     pub is_dir: bool,
 }
 
+/// One item that ended up somewhere: used to report results and to undo/redo moves and copies.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Moved {
+    pub from: String,
+    pub to: String,
+}
+
+/// What to do when a copied or moved item's name already exists in the destination.
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Resolution {
+    /// Send the existing item to the Trash and put the new one in its place.
+    Replace,
+    /// Leave this item alone.
+    Skip,
+    /// Keep both: the new item gets a " (2)" style name. This is the default.
+    Keep,
+}
+pub type Resolutions = HashMap<String, Resolution>;
+
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Conflict {
+    pub src: String,
+    pub name: String,
+    pub src_is_dir: bool,
+    pub existing_is_dir: bool,
+}
+
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Props {
+    pub name: String,
+    pub path: String,
+    pub parent: String,
+    pub is_dir: bool,
+    pub is_symlink: bool,
+    pub symlink_target: Option<String>,
+    pub size: u64,
+    pub items: Option<u64>,
+    pub mtime: f64,
+    pub ctime: f64,
+    pub atime: f64,
+    pub readonly: bool,
+    pub hidden: bool,
+    pub ext: String,
+}
+
+#[derive(Serialize, Debug, Clone, Default, PartialEq)]
+pub struct DirStats {
+    pub size: u64,
+    pub files: u64,
+    pub folders: u64,
+}
+
+// ---- progress -------------------------------------------------------------
+
+/// Receives byte counts while copying. Returning `Err` aborts the operation (used for cancel).
+pub trait Progress {
+    fn advance(&mut self, bytes: u64, current: &str) -> Res<()>;
+}
+
+pub struct NoProgress;
+impl Progress for NoProgress {
+    fn advance(&mut self, _: u64, _: &str) -> Res<()> {
+        Ok(())
+    }
+}
+
+pub const CANCELLED: &str = "Cancelled";
+
+// ---- listing --------------------------------------------------------------
+
 fn millis(t: std::io::Result<std::time::SystemTime>) -> f64 {
     t.ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -55,6 +132,10 @@ fn is_hidden_attr(_: &fs::Metadata) -> bool {
     false
 }
 
+fn ext_of(name: &str) -> String {
+    Path::new(name).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
+}
+
 pub fn list_dir(dir: &str, show_hidden: bool) -> Res<Vec<Entry>> {
     let mut out = Vec::new();
     for ent in fs::read_dir(dir).map_err(err)? {
@@ -69,27 +150,21 @@ pub fn list_dir(dir: &str, show_hidden: bool) -> Res<Vec<Entry>> {
         if hidden && !show_hidden {
             continue;
         }
-        let ext = if is_dir {
-            String::new()
-        } else {
-            Path::new(&name)
-                .extension()
-                .map(|e| e.to_string_lossy().to_lowercase())
-                .unwrap_or_default()
-        };
         out.push(Entry {
             path: ent.path().to_string_lossy().into_owned(),
             size: if is_dir { None } else { Some(md.len()) },
             mtime: millis(md.modified()),
             ctime: millis(md.created()),
+            ext: if is_dir { String::new() } else { ext_of(&name) },
             name,
             is_dir,
-            ext,
             hidden,
         });
     }
     Ok(out)
 }
+
+// ---- names ----------------------------------------------------------------
 
 /// "a.txt" -> "a (2).txt" -> "a (3).txt" ... until it does not collide.
 pub fn unique_name(name: &str, existing: &HashSet<String>) -> String {
@@ -113,17 +188,73 @@ fn names_in(dir: &Path) -> Res<HashSet<String>> {
         .collect())
 }
 
-fn copy_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
-    if src.is_dir() {
-        fs::create_dir_all(dst)?;
-        for e in fs::read_dir(src)? {
-            let e = e?;
-            copy_recursive(&e.path(), &dst.join(e.file_name()))?;
+fn file_name_of(p: &Path) -> Res<String> {
+    p.file_name().map(|n| n.to_string_lossy().into_owned()).ok_or_else(|| format!("Invalid path: {}", p.display()))
+}
+
+fn exists(p: &Path) -> bool {
+    fs::symlink_metadata(p).is_ok()
+}
+
+// ---- copying --------------------------------------------------------------
+
+fn copy_file(src: &Path, dst: &Path, p: &mut dyn Progress) -> Res<()> {
+    let name = file_name_of(src)?;
+    let mut r = fs::File::open(src).map_err(err)?;
+    let mut w = fs::File::create(dst).map_err(err)?;
+    let mut buf = vec![0u8; 1 << 20];
+    let result = (|| -> Res<()> {
+        loop {
+            let n = r.read(&mut buf).map_err(err)?;
+            if n == 0 {
+                return Ok(());
+            }
+            w.write_all(&buf[..n]).map_err(err)?;
+            p.advance(n as u64, &name)?;
+        }
+    })();
+    drop(w);
+    match result {
+        Ok(()) => {
+            if let Ok(md) = fs::metadata(src) {
+                let _ = fs::set_permissions(dst, md.permissions());
+            }
+            Ok(())
+        }
+        Err(e) => {
+            let _ = fs::remove_file(dst); // never leave a half-written copy behind
+            Err(e)
+        }
+    }
+}
+
+fn copy_recursive(src: &Path, dst: &Path, p: &mut dyn Progress) -> Res<()> {
+    let md = fs::symlink_metadata(src).map_err(err)?;
+    if md.is_dir() {
+        fs::create_dir_all(dst).map_err(err)?;
+        for e in fs::read_dir(src).map_err(err)? {
+            let e = e.map_err(err)?;
+            copy_recursive(&e.path(), &dst.join(e.file_name()), p)?;
         }
         Ok(())
+    } else if md.file_type().is_symlink() && src.is_dir() {
+        Ok(()) // links to folders are skipped, which also avoids cycles
     } else {
-        fs::copy(src, dst).map(|_| ())
+        copy_file(src, dst, p)
     }
+}
+
+/// Total bytes in files under `paths` (symlinks not followed).
+pub fn total_size(paths: &[String]) -> u64 {
+    fn walk(p: &Path) -> u64 {
+        let Ok(md) = fs::symlink_metadata(p) else { return 0 };
+        if md.is_dir() {
+            fs::read_dir(p).map(|rd| rd.flatten().map(|e| walk(&e.path())).sum()).unwrap_or(0)
+        } else {
+            md.len()
+        }
+    }
+    paths.iter().map(|p| walk(Path::new(p))).sum()
 }
 
 fn inside(dest: &Path, src: &Path) -> bool {
@@ -132,47 +263,124 @@ fn inside(dest: &Path, src: &Path) -> bool {
     d.starts_with(&s)
 }
 
-fn file_name_of(p: &Path) -> Res<String> {
-    p.file_name().map(|n| n.to_string_lossy().into_owned()).ok_or_else(|| format!("Invalid path: {}", p.display()))
+/// Sends an existing item to the Trash so "Replace" is always recoverable.
+#[cfg(not(test))]
+fn recycle(p: &Path) -> Res<()> {
+    trash::delete(p).map_err(err)
+}
+#[cfg(test)]
+fn recycle(p: &Path) -> Res<()> {
+    // tests must not fill the real Recycle Bin
+    if p.is_dir() { fs::remove_dir_all(p) } else { fs::remove_file(p) }.map_err(err)
 }
 
-pub fn copy_into(srcs: &[String], dest_dir: &str) -> Res<()> {
-    let dest = Path::new(dest_dir);
-    let mut existing = names_in(dest)?;
-    for s in srcs {
-        let s = Path::new(s);
-        if inside(dest, s) {
-            return Err("Cannot copy a folder into itself".into());
+/// Where `src` goes inside `dest` given the user's choice. `None` means "skip it".
+fn resolve_target(
+    src: &Path,
+    dest: &Path,
+    existing: &mut HashSet<String>,
+    res: &Resolutions,
+) -> Res<Option<PathBuf>> {
+    let name = file_name_of(src)?;
+    let same_dir = src.parent() == Some(dest);
+    if !same_dir && existing.contains(&name) {
+        match res.get(&src.to_string_lossy().into_owned()).copied().unwrap_or(Resolution::Keep) {
+            Resolution::Skip => return Ok(None),
+            Resolution::Replace => {
+                recycle(&dest.join(&name))?;
+                return Ok(Some(dest.join(name)));
+            }
+            Resolution::Keep => {}
         }
-        let name = unique_name(&file_name_of(s)?, &existing);
-        existing.insert(name.clone());
-        copy_recursive(s, &dest.join(name)).map_err(err)?;
     }
-    Ok(())
+    let unique = unique_name(&name, existing);
+    existing.insert(unique.clone());
+    Ok(Some(dest.join(unique)))
 }
 
-pub fn move_into(srcs: &[String], dest_dir: &str) -> Res<()> {
+/// Items from `srcs` whose names already exist in `dest_dir` (excluding same-folder duplicates).
+pub fn conflicts(srcs: &[String], dest_dir: &str) -> Res<Vec<Conflict>> {
     let dest = Path::new(dest_dir);
-    let mut existing = names_in(dest)?;
+    let mut out = Vec::new();
     for s in srcs {
-        let s = Path::new(s);
-        if s.parent() == Some(dest) {
+        let sp = Path::new(s);
+        if sp.parent() == Some(dest) {
             continue;
         }
-        if inside(dest, s) {
+        let name = file_name_of(sp)?;
+        let target = dest.join(&name);
+        if let Ok(md) = fs::symlink_metadata(&target) {
+            out.push(Conflict {
+                src: s.clone(),
+                name,
+                src_is_dir: sp.is_dir(),
+                existing_is_dir: md.is_dir(),
+            });
+        }
+    }
+    Ok(out)
+}
+
+pub fn copy_into(srcs: &[String], dest_dir: &str, res: &Resolutions, p: &mut dyn Progress) -> Res<Vec<Moved>> {
+    let dest = Path::new(dest_dir);
+    let mut existing = names_in(dest)?;
+    let mut done = Vec::new();
+    for s in srcs {
+        let sp = Path::new(s);
+        if inside(dest, sp) && sp.is_dir() {
+            return Err("Cannot copy a folder into itself".into());
+        }
+        let Some(target) = resolve_target(sp, dest, &mut existing, res)? else { continue };
+        copy_recursive(sp, &target, p)?;
+        done.push(Moved { from: s.clone(), to: target.to_string_lossy().into_owned() });
+    }
+    Ok(done)
+}
+
+pub fn move_into(srcs: &[String], dest_dir: &str, res: &Resolutions, p: &mut dyn Progress) -> Res<Vec<Moved>> {
+    let dest = Path::new(dest_dir);
+    let mut existing = names_in(dest)?;
+    let mut done = Vec::new();
+    for s in srcs {
+        let sp = Path::new(s);
+        if sp.parent() == Some(dest) {
+            continue;
+        }
+        if inside(dest, sp) {
             return Err("Cannot move a folder into itself".into());
         }
-        let name = unique_name(&file_name_of(s)?, &existing);
-        existing.insert(name.clone());
-        let target = dest.join(name);
-        if fs::rename(s, &target).is_err() {
-            // e.g. across volumes: copy then remove
-            copy_recursive(s, &target).map_err(err)?;
-            if s.is_dir() { fs::remove_dir_all(s) } else { fs::remove_file(s) }.map_err(err)?;
+        let Some(target) = resolve_target(sp, dest, &mut existing, res)? else { continue };
+        move_one(sp, &target, p)?;
+        done.push(Moved { from: s.clone(), to: target.to_string_lossy().into_owned() });
+    }
+    Ok(done)
+}
+
+fn move_one(src: &Path, target: &Path, p: &mut dyn Progress) -> Res<()> {
+    if fs::rename(src, target).is_ok() {
+        return Ok(());
+    }
+    // e.g. across volumes: copy (with progress), then remove the original
+    copy_recursive(src, target, p)?;
+    if src.is_dir() { fs::remove_dir_all(src) } else { fs::remove_file(src) }.map_err(err)
+}
+
+/// Moves each `to` back to / onto `from` exactly (used to undo and redo moves).
+pub fn rename_many(pairs: &[Moved]) -> Res<()> {
+    for m in pairs {
+        let (from, to) = (Path::new(&m.from), Path::new(&m.to));
+        if exists(to) {
+            return Err(format!("\"{}\" already exists", file_name_of(to)?));
         }
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent).map_err(err)?;
+        }
+        move_one(from, to, &mut NoProgress)?;
     }
     Ok(())
 }
+
+// ---- rename / create ------------------------------------------------------
 
 pub fn rename(path: &str, new_name: &str) -> Res<String> {
     if new_name.trim().is_empty() || new_name.contains('/') || new_name.contains('\\') {
@@ -181,7 +389,7 @@ pub fn rename(path: &str, new_name: &str) -> Res<String> {
     let p = Path::new(path);
     let target = p.parent().ok_or("Invalid path")?.join(new_name);
     let case_only = file_name_of(p)?.eq_ignore_ascii_case(new_name);
-    if fs::symlink_metadata(&target).is_ok() && !case_only {
+    if exists(&target) && !case_only {
         return Err("A file with that name already exists".into());
     }
     fs::rename(p, &target).map_err(err)?;
@@ -202,6 +410,17 @@ pub fn new_file(dir: &str, name: &str) -> Res<String> {
     Ok(d.join(n).to_string_lossy().into_owned())
 }
 
+/// Recreates an empty folder or file at an exact path (redo of "new folder" / "new file").
+pub fn create_exact(path: &str, is_dir: bool) -> Res<()> {
+    let p = Path::new(path);
+    if exists(p) {
+        return Err("Already exists".into());
+    }
+    if is_dir { fs::create_dir(p) } else { fs::write(p, b"") }.map_err(err)
+}
+
+// ---- search ---------------------------------------------------------------
+
 pub fn search(root: &str, query: &str, limit: usize) -> Vec<Hit> {
     let q = query.to_lowercase();
     let mut hits = Vec::new();
@@ -213,8 +432,7 @@ pub fn search(root: &str, query: &str, limit: usize) -> Vec<Hit> {
         let Ok(rd) = fs::read_dir(&d) else { continue };
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
-            let ft = e.file_type().ok();
-            let is_dir = ft.map(|t| t.is_dir()).unwrap_or(false); // symlinks are not followed
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false); // symlinks are not followed
             if name.to_lowercase().contains(&q) {
                 hits.push(Hit { name, path: e.path().to_string_lossy().into_owned(), is_dir });
             }
@@ -228,6 +446,71 @@ pub fn search(root: &str, query: &str, limit: usize) -> Vec<Hit> {
     }
     hits
 }
+
+// ---- properties and preview -----------------------------------------------
+
+pub fn properties(path: &str) -> Res<Props> {
+    let p = Path::new(path);
+    let lmd = fs::symlink_metadata(p).map_err(err)?;
+    let is_symlink = lmd.file_type().is_symlink();
+    let md = fs::metadata(p).unwrap_or_else(|_| lmd.clone());
+    let name = file_name_of(p).unwrap_or_else(|_| path.to_string());
+    let is_dir = md.is_dir();
+    Ok(Props {
+        ext: if is_dir { String::new() } else { ext_of(&name) },
+        parent: p.parent().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default(),
+        symlink_target: if is_symlink { fs::read_link(p).ok().map(|t| t.to_string_lossy().into_owned()) } else { None },
+        size: if is_dir { 0 } else { md.len() },
+        items: if is_dir { fs::read_dir(p).ok().map(|rd| rd.flatten().count() as u64) } else { None },
+        mtime: millis(md.modified()),
+        ctime: millis(md.created()),
+        atime: millis(md.accessed()),
+        readonly: md.permissions().readonly(),
+        hidden: name.starts_with('.') || is_hidden_attr(&lmd),
+        name,
+        path: path.to_string(),
+        is_dir,
+        is_symlink,
+    })
+}
+
+/// Recursive size and counts for a folder (symlinks not followed).
+pub fn dir_stats(path: &str) -> DirStats {
+    fn walk(p: &Path, s: &mut DirStats) {
+        let Ok(rd) = fs::read_dir(p) else { return };
+        for e in rd.flatten() {
+            let Ok(md) = fs::symlink_metadata(e.path()) else { continue };
+            if md.is_dir() {
+                s.folders += 1;
+                walk(&e.path(), s);
+            } else {
+                s.files += 1;
+                s.size += md.len();
+            }
+        }
+    }
+    let mut s = DirStats::default();
+    walk(Path::new(path), &mut s);
+    s
+}
+
+/// First `max_bytes` of a file as text, or `None` if it looks binary.
+pub fn text_preview(path: &str, max_bytes: usize) -> Res<Option<String>> {
+    let mut buf = Vec::new();
+    fs::File::open(path).map_err(err)?.take(max_bytes as u64).read_to_end(&mut buf).map_err(err)?;
+    if buf.contains(&0) {
+        return Ok(None);
+    }
+    let text = String::from_utf8_lossy(&buf).into_owned();
+    let bad = text.chars().filter(|c| *c == '\u{FFFD}').count();
+    // an incomplete multi-byte character at the cut-off is fine; many bad characters means binary
+    if bad > 2 && bad * 50 > text.chars().count() {
+        return Ok(None);
+    }
+    Ok(Some(text))
+}
+
+// ---- places ---------------------------------------------------------------
 
 pub fn drives() -> Vec<Place> {
     let os = std::env::consts::OS;
@@ -283,6 +566,12 @@ mod tests {
     fn s(p: &Path) -> String {
         p.to_string_lossy().into_owned()
     }
+    fn none() -> Resolutions {
+        Resolutions::new()
+    }
+    fn read(p: &Path) -> String {
+        fs::read_to_string(p).unwrap()
+    }
 
     #[test]
     fn full_flow() {
@@ -294,17 +583,17 @@ mod tests {
         names.sort();
         assert_eq!(names, ["a.txt", "sub"]);
 
-        copy_into(&[s(&d.join("a.txt"))], &s(&d)).unwrap();
+        // duplicating next to the original keeps both
+        let dup = copy_into(&[s(&d.join("a.txt"))], &s(&d), &none(), &mut NoProgress).unwrap();
+        assert_eq!(dup[0].to, s(&d.join("a (2).txt")));
         assert!(d.join("a (2).txt").exists());
 
-        move_into(&[s(&d.join("a (2).txt"))], &s(&d.join("sub"))).unwrap();
-        assert!(d.join("sub").join("a (2).txt").exists());
+        let moved = move_into(&[s(&d.join("a (2).txt"))], &s(&d.join("sub")), &none(), &mut NoProgress).unwrap();
+        assert_eq!(moved, [Moved { from: s(&d.join("a (2).txt")), to: s(&d.join("sub").join("a (2).txt")) }]);
         assert!(!d.join("a (2).txt").exists());
 
-        let e = move_into(&[s(&d.join("sub"))], &s(&d.join("sub"))).unwrap_err();
-        assert!(e.contains("itself"));
-        let e = copy_into(&[s(&d.join("sub"))], &s(&d.join("sub"))).unwrap_err();
-        assert!(e.contains("itself"));
+        assert!(move_into(&[s(&d.join("sub"))], &s(&d.join("sub")), &none(), &mut NoProgress).unwrap_err().contains("itself"));
+        assert!(copy_into(&[s(&d.join("sub"))], &s(&d.join("sub")), &none(), &mut NoProgress).unwrap_err().contains("itself"));
 
         rename(&s(&d.join("a.txt")), "b.txt").unwrap();
         assert!(rename(&s(&d.join("b.txt")), "sub").unwrap_err().contains("exists"));
@@ -312,7 +601,6 @@ mod tests {
         rename(&s(&d.join("b.txt")), "B.txt").unwrap(); // case-only rename is allowed
 
         assert_eq!(search(&s(&d), "a (2)", 500).len(), 1);
-
         assert_eq!(Path::new(&make_dir(&s(&d), "New folder").unwrap()).file_name().unwrap(), "New folder");
         assert_eq!(Path::new(&make_dir(&s(&d), "New folder").unwrap()).file_name().unwrap(), "New folder (2)");
         fs::remove_dir_all(d).unwrap();
@@ -329,6 +617,111 @@ mod tests {
         let ex: HashSet<String> = ["a.tar.gz".to_string(), "a.tar (2).gz".to_string()].into();
         assert_eq!(unique_name("a.tar.gz", &ex), "a.tar (3).gz");
         assert_eq!(unique_name("fresh", &ex), "fresh");
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn conflict_resolutions() {
+        let d = tmp();
+        let (src, dst) = (d.join("src"), d.join("dst"));
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+        for (dir, text) in [(&src, "new"), (&dst, "old")] {
+            fs::write(dir.join("a.txt"), text).unwrap();
+        }
+        fs::write(src.join("b.txt"), "new-b").unwrap();
+        fs::write(dst.join("b.txt"), "old-b").unwrap();
+        fs::write(src.join("c.txt"), "new-c").unwrap(); // no conflict
+        let all = [s(&src.join("a.txt")), s(&src.join("b.txt")), s(&src.join("c.txt"))];
+
+        let found = conflicts(&all, &s(&dst)).unwrap();
+        assert_eq!(found.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["a.txt", "b.txt"]);
+        // copying into the folder the items already live in is a duplicate, not a conflict
+        assert!(conflicts(&all, &s(&src)).unwrap().is_empty());
+
+        let mut res = Resolutions::new();
+        res.insert(all[0].clone(), Resolution::Replace);
+        res.insert(all[1].clone(), Resolution::Skip);
+        let done = copy_into(&all, &s(&dst), &res, &mut NoProgress).unwrap();
+        assert_eq!(read(&dst.join("a.txt")), "new"); // replaced
+        assert_eq!(read(&dst.join("b.txt")), "old-b"); // skipped
+        assert_eq!(read(&dst.join("c.txt")), "new-c"); // copied
+        assert_eq!(done.len(), 2); // skipped item is not reported
+
+        // default is keep-both
+        copy_into(&[all[1].clone()], &s(&dst), &none(), &mut NoProgress).unwrap();
+        assert_eq!(read(&dst.join("b (2).txt")), "new-b");
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn undo_moves_and_exact_create() {
+        let d = tmp();
+        fs::create_dir(d.join("sub")).unwrap();
+        fs::write(d.join("a.txt"), "x").unwrap();
+        let moved = move_into(&[s(&d.join("a.txt"))], &s(&d.join("sub")), &none(), &mut NoProgress).unwrap();
+        let inverse: Vec<Moved> = moved.iter().map(|m| Moved { from: m.to.clone(), to: m.from.clone() }).collect();
+        rename_many(&inverse).unwrap();
+        assert!(d.join("a.txt").exists() && !d.join("sub").join("a.txt").exists());
+        // refuses to overwrite
+        fs::write(d.join("sub").join("a.txt"), "y").unwrap();
+        assert!(rename_many(&moved).unwrap_err().contains("already exists"));
+
+        create_exact(&s(&d.join("made")), true).unwrap();
+        assert!(d.join("made").is_dir());
+        assert!(create_exact(&s(&d.join("made")), true).is_err());
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    struct CancelAfter(u64, u64);
+    impl Progress for CancelAfter {
+        fn advance(&mut self, bytes: u64, _: &str) -> Res<()> {
+            self.1 += bytes;
+            if self.1 >= self.0 { Err(CANCELLED.into()) } else { Ok(()) }
+        }
+    }
+
+    #[test]
+    fn progress_and_cancel() {
+        let d = tmp();
+        fs::create_dir(d.join("out")).unwrap();
+        fs::write(d.join("big.bin"), vec![7u8; 3 << 20]).unwrap(); // three 1 MiB chunks
+        assert_eq!(total_size(&[s(&d.join("big.bin"))]), 3 << 20);
+
+        struct Count(u64);
+        impl Progress for Count {
+            fn advance(&mut self, b: u64, _: &str) -> Res<()> { self.0 += b; Ok(()) }
+        }
+        let mut c = Count(0);
+        copy_into(&[s(&d.join("big.bin"))], &s(&d.join("out")), &none(), &mut c).unwrap();
+        assert_eq!(c.0, 3 << 20);
+
+        fs::remove_file(d.join("out").join("big.bin")).unwrap();
+        let err = copy_into(&[s(&d.join("big.bin"))], &s(&d.join("out")), &none(), &mut CancelAfter(1 << 20, 0)).unwrap_err();
+        assert_eq!(err, CANCELLED);
+        assert!(!d.join("out").join("big.bin").exists(), "partial copy must be removed");
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn properties_stats_and_preview() {
+        let d = tmp();
+        fs::create_dir(d.join("dir")).unwrap();
+        fs::write(d.join("dir").join("one.txt"), "hello").unwrap();
+        fs::create_dir(d.join("dir").join("inner")).unwrap();
+        fs::write(d.join("dir").join("inner").join("two.txt"), "world!!").unwrap();
+
+        let p = properties(&s(&d.join("dir").join("one.txt"))).unwrap();
+        assert_eq!((p.name.as_str(), p.ext.as_str(), p.size, p.is_dir), ("one.txt", "txt", 5, false));
+        let p = properties(&s(&d.join("dir"))).unwrap();
+        assert!(p.is_dir);
+        assert_eq!(p.items, Some(2));
+        assert_eq!(dir_stats(&s(&d.join("dir"))), DirStats { size: 12, files: 2, folders: 1 });
+
+        assert_eq!(text_preview(&s(&d.join("dir").join("one.txt")), 1024).unwrap().as_deref(), Some("hello"));
+        assert_eq!(text_preview(&s(&d.join("dir").join("one.txt")), 3).unwrap().as_deref(), Some("hel"));
+        fs::write(d.join("bin.dat"), [0u8, 1, 2, 255, 0]).unwrap();
+        assert_eq!(text_preview(&s(&d.join("bin.dat")), 1024).unwrap(), None);
         fs::remove_dir_all(d).unwrap();
     }
 }

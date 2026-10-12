@@ -1,14 +1,13 @@
 mod fs_service;
 
-use fs_service::{Entry, Hit, Place};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
-#[cfg(target_os = "macos")]
-use tauri::Emitter;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use fs_service::{Conflict, DirStats, Entry, Hit, Moved, Place, Progress, Props, Res, Resolutions, CANCELLED};
+use serde::Serialize;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
-
-type Res<T> = Result<T, String>;
 
 static WINDOW_SEQ: AtomicUsize = AtomicUsize::new(0);
 
@@ -49,14 +48,132 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Res<T> + Send + 'static
 async fn list_dir(dir: String, show_hidden: bool) -> Res<Vec<Entry>> {
     blocking(move || fs_service::list_dir(&dir, show_hidden)).await
 }
+
+// ---- long-running operations: progress + cancel ---------------------------
+
+/// Cancel flags for running copy/move operations, keyed by the id the UI chose.
+#[derive(Default)]
+struct Ops(Mutex<HashMap<String, Arc<AtomicBool>>>);
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ProgressEvent {
+    op_id: String,
+    done: u64,
+    total: u64,
+    current: String,
+}
+
+struct OpProgress {
+    app: AppHandle,
+    op_id: String,
+    srcs: Vec<String>,
+    total: Option<u64>, // measured lazily: instant same-volume moves never need it
+    done: u64,
+    last_emit: Instant,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Progress for OpProgress {
+    fn advance(&mut self, bytes: u64, current: &str) -> Res<()> {
+        if self.cancel.load(Ordering::Relaxed) {
+            return Err(CANCELLED.into());
+        }
+        let total = *self.total.get_or_insert_with(|| fs_service::total_size(&self.srcs));
+        self.done += bytes;
+        if self.last_emit.elapsed() >= Duration::from_millis(80) {
+            self.last_emit = Instant::now();
+            let _ = self.app.emit(
+                "op-progress",
+                ProgressEvent { op_id: self.op_id.clone(), done: self.done, total, current: current.to_string() },
+            );
+        }
+        Ok(())
+    }
+}
+
+async fn run_op<T: Send + 'static>(
+    app: AppHandle,
+    ops: &Ops,
+    op_id: String,
+    srcs: Vec<String>,
+    f: impl FnOnce(&mut OpProgress) -> Res<T> + Send + 'static,
+) -> Res<T> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    ops.0.lock().unwrap().insert(op_id.clone(), cancel.clone());
+    let id = op_id.clone();
+    let result = blocking(move || {
+        let mut p = OpProgress { app, op_id, srcs, total: None, done: 0, last_emit: Instant::now(), cancel };
+        f(&mut p)
+    })
+    .await;
+    ops.0.lock().unwrap().remove(&id);
+    result
+}
+
 #[tauri::command]
-async fn copy_into(srcs: Vec<String>, dest_dir: String) -> Res<()> {
-    blocking(move || fs_service::copy_into(&srcs, &dest_dir)).await
+fn cancel_op(ops: State<'_, Ops>, op_id: String) {
+    if let Some(flag) = ops.0.lock().unwrap().get(&op_id) {
+        flag.store(true, Ordering::Relaxed);
+    }
 }
 #[tauri::command]
-async fn move_into(srcs: Vec<String>, dest_dir: String) -> Res<()> {
-    blocking(move || fs_service::move_into(&srcs, &dest_dir)).await
+async fn find_conflicts(srcs: Vec<String>, dest_dir: String) -> Res<Vec<Conflict>> {
+    blocking(move || fs_service::conflicts(&srcs, &dest_dir)).await
 }
+#[tauri::command]
+async fn copy_into(
+    app: AppHandle,
+    ops: State<'_, Ops>,
+    op_id: String,
+    srcs: Vec<String>,
+    dest_dir: String,
+    resolutions: Option<Resolutions>,
+) -> Res<Vec<Moved>> {
+    let list = srcs.clone();
+    run_op(app, &ops, op_id, srcs, move |p| {
+        fs_service::copy_into(&list, &dest_dir, &resolutions.unwrap_or_default(), p)
+    })
+    .await
+}
+#[tauri::command]
+async fn move_into(
+    app: AppHandle,
+    ops: State<'_, Ops>,
+    op_id: String,
+    srcs: Vec<String>,
+    dest_dir: String,
+    resolutions: Option<Resolutions>,
+) -> Res<Vec<Moved>> {
+    let list = srcs.clone();
+    run_op(app, &ops, op_id, srcs, move |p| {
+        fs_service::move_into(&list, &dest_dir, &resolutions.unwrap_or_default(), p)
+    })
+    .await
+}
+/// Moves each `to` back onto `from` exactly (undo / redo of moves).
+#[tauri::command]
+async fn rename_many(pairs: Vec<Moved>) -> Res<()> {
+    blocking(move || fs_service::rename_many(&pairs)).await
+}
+/// Recreates an empty folder or file at an exact path (redo of "new folder" / "new file").
+#[tauri::command]
+async fn create_path(path: String, is_dir: bool) -> Res<()> {
+    blocking(move || fs_service::create_exact(&path, is_dir)).await
+}
+#[tauri::command]
+async fn properties(path: String) -> Res<Props> {
+    blocking(move || fs_service::properties(&path)).await
+}
+#[tauri::command]
+async fn dir_stats(path: String) -> Res<DirStats> {
+    blocking(move || Ok(fs_service::dir_stats(&path))).await
+}
+#[tauri::command]
+async fn text_preview(path: String, max_bytes: usize) -> Res<Option<String>> {
+    blocking(move || fs_service::text_preview(&path, max_bytes.min(1 << 20))).await
+}
+
 #[tauri::command]
 async fn rename_path(path: String, new_name: String) -> Res<String> {
     blocking(move || fs_service::rename(&path, &new_name)).await
@@ -81,10 +198,85 @@ async fn drives() -> Res<Vec<Place>> {
 fn quick_access(app: AppHandle) -> Res<Vec<Place>> {
     Ok(fs_service::quick_access(&app.path().home_dir().map_err(|e| e.to_string())?))
 }
+
+// ---- trash --------------------------------------------------------------------
+
 #[tauri::command]
 async fn trash_paths(paths: Vec<String>) -> Res<()> {
     blocking(move || trash::delete_all(&paths).map_err(|e| e.to_string())).await
 }
+
+/// Takes items back out of the Trash / Recycle Bin (undo of a delete).
+#[tauri::command]
+async fn restore_trashed(paths: Vec<String>) -> Res<usize> {
+    blocking(move || restore_from_trash(&paths)).await
+}
+
+#[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+fn restore_from_trash(paths: &[String]) -> Res<usize> {
+    let items = trash::os_limited::list().map_err(|e| e.to_string())?;
+    let mut chosen = Vec::new();
+    for p in paths {
+        let want = std::path::Path::new(p);
+        // if the same path was deleted several times, restore the most recent one
+        if let Some(item) = items.iter().filter(|i| i.original_path() == want).max_by_key(|i| i.time_deleted) {
+            chosen.push(item.clone());
+        }
+    }
+    let n = chosen.len();
+    if n == 0 {
+        return Err("Could not find the item in the Recycle Bin".into());
+    }
+    trash::os_limited::restore_all(chosen).map_err(|e| e.to_string())?;
+    Ok(n)
+}
+#[cfg(target_os = "macos")]
+fn restore_from_trash(_: &[String]) -> Res<usize> {
+    Err("Undoing a delete is not supported on macOS. Use Put Back in the Trash.".into())
+}
+
+// ---- native file icons ------------------------------------------------------
+
+/// Icons already fetched, keyed by file type (or by path for per-file icons such as .exe).
+#[derive(Default)]
+struct IconCache(Mutex<HashMap<String, Option<String>>>);
+
+#[cfg(not(target_os = "linux"))]
+fn icon_data_url(path: &str) -> Res<Option<String>> {
+    use base64::Engine;
+    let icon = file_icon_provider::get_file_icon(path, 32).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut out, icon.width, icon.height);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut w = enc.write_header().map_err(|e| e.to_string())?;
+        w.write_image_data(&icon.pixels).map_err(|e| e.to_string())?;
+    }
+    Ok(Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(out))))
+}
+// the icon library needs the main thread on Linux; the UI falls back to built-in icons there
+#[cfg(target_os = "linux")]
+fn icon_data_url(_: &str) -> Res<Option<String>> {
+    Ok(None)
+}
+
+#[tauri::command]
+async fn file_icon(cache: State<'_, IconCache>, path: String, is_dir: bool) -> Res<Option<String>> {
+    let ext = std::path::Path::new(&path).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    // most icons depend only on the file type; these carry their own artwork
+    let per_file = matches!(ext.as_str(), "exe" | "lnk" | "ico" | "msi" | "url" | "app" | "scr" | "cur" | "appref-ms");
+    let key = if per_file { format!("p:{path}") } else if is_dir { "dir".to_string() } else { format!("e:{ext}") };
+    if let Some(hit) = cache.0.lock().unwrap().get(&key) {
+        return Ok(hit.clone());
+    }
+    let icon = blocking(move || icon_data_url(&path)).await.unwrap_or(None);
+    cache.0.lock().unwrap().insert(key, icon.clone());
+    Ok(icon)
+}
+
+// ---- opening things -----------------------------------------------------------
+
 #[tauri::command]
 fn open_path(app: AppHandle, path: String) -> Res<()> {
     app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
@@ -186,6 +378,8 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .manage(Startup(Instant::now()))
+        .manage(Ops::default())
+        .manage(IconCache::default())
         .setup(|app| {
             let args: Vec<String> = std::env::args().collect();
             open_window(app.handle(), folder_from_args(&args))?;
@@ -194,7 +388,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_dir, copy_into, move_into, rename_path, make_dir, new_file, search, drives, quick_access,
             trash_paths, open_path, reveal_path, is_dir, home_dir, platform, new_window, clipboard_write,
-            clipboard_read, clipboard_text, open_terminal
+            clipboard_read, clipboard_text, open_terminal, cancel_op, find_conflicts, rename_many, create_path,
+            properties, dir_stats, text_preview, restore_trashed, file_icon
         ])
         .build(tauri::generate_context!())
         .expect("error while building Explorer X");
@@ -205,7 +400,7 @@ pub fn run() {
             // macOS: "open this folder with Explorer X" (also fires right after a cold launch).
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Opened { urls } => {
-                let cold = app.state::<Startup>().0.elapsed() < std::time::Duration::from_secs(3);
+                let cold = app.state::<Startup>().0.elapsed() < Duration::from_secs(3);
                 let mut reuse_first = cold;
                 for p in urls.iter().filter_map(|u| u.to_file_path().ok()).filter(|p| p.is_dir()) {
                     let p = p.to_string_lossy().into_owned();
