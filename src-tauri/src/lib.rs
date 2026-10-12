@@ -110,8 +110,9 @@ fn platform() -> &'static str {
         other => other,
     }
 }
+// async on purpose: creating a window from a sync command deadlocks on Windows
 #[tauri::command]
-fn new_window(app: AppHandle, path: Option<String>) -> Res<()> {
+async fn new_window(app: AppHandle, path: Option<String>) -> Res<()> {
     open_window(&app, path).map_err(|e| e.to_string())
 }
 

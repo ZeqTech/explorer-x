@@ -34,7 +34,7 @@ jobs:
           workspaces: src-tauri
       - name: Build
         shell: bash
-        run: ./build.sh ${{ matrix.target }}
+        run: sh ./build.sh ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:
           name: explorer-x-${{ matrix.target }}
