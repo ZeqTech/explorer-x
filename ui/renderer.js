@@ -1,4 +1,4 @@
-import { fmtSize, fmtDate, fmtDateTime, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves } from './format.js';
+import { iconKey, fmtSize, fmtDate, fmtDateTime, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves } from './format.js';
 import { UndoStack } from './undo.js';
 import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDialog, dialogOpen } from './dialogs.js';
 
@@ -26,6 +26,28 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
     document.documentElement.style.setProperty('--navw', state.navw + 'px');
     $('zoom').value = state.icon;
   };
+
+  // Native OS icons: loaded when an item scrolls into view; the emoji below is shown until then
+  // (and stays on platforms where no native icon is available).
+  const nativeIcons = new Map(); // cache key -> Promise<data URL | null>
+  const nativeIcon = (e) => {
+    const k = iconKey(e);
+    if (!nativeIcons.has(k)) nativeIcons.set(k, api.fileIcon(e.path, e.isDir).catch(() => null));
+    return nativeIcons.get(k);
+  };
+  const fillIcon = (holder) => {
+    const e = holder._entry;
+    if (!e) return;
+    nativeIcon(e).then((url) => {
+      if (!url || !holder.isConnected) return;
+      const img = document.createElement('img'); img.className = 'nicon'; img.alt = ''; img.src = url; img.draggable = false;
+      holder.textContent = ''; holder.appendChild(img);
+    });
+  };
+  const iconObserver = new IntersectionObserver((hits) => {
+    for (const h of hits) if (h.isIntersecting) { iconObserver.unobserve(h.target); fillIcon(h.target); }
+  }, { root: $('files'), rootMargin: '300px' });
+  const lazyIcon = (holder, e) => { holder._entry = e; iconObserver.observe(holder); };
 
   const icon = (e) => (e.isDir ? '\u{1F4C1}' : { png: '\u{1F5BC}', jpg: '\u{1F5BC}', jpeg: '\u{1F5BC}', gif: '\u{1F5BC}', mp3: '\u{1F3B5}', wav: '\u{1F3B5}', mp4: '\u{1F39E}', mkv: '\u{1F39E}', zip: '\u{1F5DC}', pdf: '\u{1F4D5}' }[e.ext] || '\u{1F4C4}');
   const parentOf = (p) => parentOfSep(p, state.sep);
@@ -259,7 +281,7 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
     el.className = (state.view === 'details' ? 'row item' : 'tile') + (state.sel.has(e.path) ? ' sel' : '') + (state.cut.has(e.path) ? ' cut' : '');
     if (state.view === 'details') {
       const n = document.createElement('span'); n.className = 'nameCell';
-      const ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = icon(e);
+      const ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = icon(e); lazyIcon(ic, e);
       const t = document.createElement('span'); t.className = 'nm'; t.textContent = e.name;
       n.append(ic, t);
       const m = document.createElement('span'); m.textContent = e.mtime ? fmtDate(e.mtime) : '';
@@ -272,7 +294,7 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
         const im = document.createElement('img'); im.loading = 'lazy'; im.src = fileUrl(e.path);
         im.onerror = () => { im.remove(); b.textContent = icon(e); };
         b.appendChild(im);
-      } else b.textContent = icon(e);
+      } else { b.textContent = icon(e); lazyIcon(b, e); }
       const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = e.name;
       el.append(b, nm);
     }
@@ -412,9 +434,11 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
     const rows = [['Type', typeOf(e)], ['Size', e.size != null ? fmtSize(e.size) : ''], ['Modified', e.mtime ? fmtDateTime(e.mtime) : ''], ['Created', e.ctime ? fmtDateTime(e.ctime) : ''], ['Location', parentOf(e.path)]];
     const title = el('h4', { className: 'ptitle' }, e.name);
     const fallback = el('div', { className: 'pbig' }, icon(e));
+    fallback._entry = e; // filled with the native icon once it is on the page (see below)
     if (e.isDir) {
       const contents = el('dd', {}, 'Calculating\u2026');
       put(title, fallback, metaList(rows), el('dl', { className: 'meta' }, el('dt', {}, 'Contains'), contents));
+      fillIcon(fallback);
       api.dirStats(e.path).then((s) => { if (token === previewToken) contents.textContent = plural(s.files, 'file') + ', ' + plural(s.folders, 'folder') + ' \u00B7 ' + fmtSize(s.size); }).catch(() => { contents.textContent = '\u2014'; });
       return;
     }
@@ -423,13 +447,14 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
       const tag = IMG.has(e.ext) ? 'img' : VIDEO.has(e.ext) ? 'video' : 'audio';
       media = el(tag, { className: 'pmedia', src: fileUrl(e.path) });
       if (tag !== 'img') { media.controls = true; media.preload = 'metadata'; }
-      media.onerror = () => { if (token === previewToken) media.replaceWith(fallback); };
+      media.onerror = () => { if (token === previewToken) { media.replaceWith(fallback); fillIcon(fallback); } };
     } else if (e.size) {
       const text = await api.textPreview(e.path, 6000).catch(() => null);
       if (token !== previewToken) return;
       if (text != null) media = el('pre', { className: 'ptext' }, text + (e.size > 6000 ? '\n\u2026' : ''));
     }
     put(title, media || fallback, metaList(rows));
+    if (!media) fillIcon(fallback); // the icon may arrive before the pane is attached, so ask after put()
   }
 
   function togglePreview() {

@@ -36,11 +36,11 @@ export function baseName(p) {
   return p.split(/[\\/]/).filter(Boolean).pop() || p;
 }
 
-/** Cache key for a native file icon: icons depend on the file type, except for a few kinds. */
+/** Cache key for a native file icon: icons depend on the file type, except for folders and a few kinds. */
 const PER_FILE = new Set(['exe', 'lnk', 'ico', 'msi', 'url', 'app', 'scr', 'cur', 'appref-ms']);
 export function iconKey(e) {
-  if (PER_FILE.has(e.ext)) return 'p:' + e.path;
-  return e.isDir ? 'dir' : 'e:' + e.ext;
+  if (e.isDir || PER_FILE.has(e.ext)) return 'p:' + e.path;
+  return 'e:' + e.ext;
 }
 
 /** "3 items", "1 item" */

@@ -92,7 +92,7 @@ body.resizing { cursor: col-resize; }
 .prow span:last-child { word-break: break-all; }
 
 /* ---- tabs ---- */
-#tabs { display: flex; align-items: flex-end; gap: 2px; padding: 4px 8px 0; background: var(--bar); border-bottom: 1px solid var(--line); overflow-x: auto; }
+#tabs { display: flex; align-items: flex-end; gap: 2px; padding: 4px 8px 0; background: var(--bar); border-bottom: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .tab { display: flex; align-items: center; gap: 6px; max-width: 200px; min-width: 90px; padding: 5px 6px 5px 12px; border: 1px solid transparent; border-bottom: 0; border-radius: 6px 6px 0 0; cursor: default; }
 .tab:hover { background: var(--hover); }
 .tab.active { background: var(--bg); border-color: var(--line); margin-bottom: -1px; padding-bottom: 6px; }
@@ -114,3 +114,9 @@ audio.pmedia { width: 100%; }
 dl.meta { display: grid; grid-template-columns: 70px 1fr; gap: 4px 8px; margin: 0; }
 dl.meta dt { color: var(--muted); }
 dl.meta dd { margin: 0; word-break: break-all; }
+
+/* ---- native file icons ---- */
+.nicon { display: block; object-fit: contain; pointer-events: none; }
+.ic .nicon { width: var(--row-icon); height: var(--row-icon); margin: 0 auto; }
+.tile .big .nicon { width: calc(var(--icon) * 0.85); height: calc(var(--icon) * 0.85); }
+.pbig .nicon { width: 72px; height: 72px; margin: 0 auto; }

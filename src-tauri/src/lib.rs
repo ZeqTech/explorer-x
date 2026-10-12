@@ -244,7 +244,7 @@ struct IconCache(Mutex<HashMap<String, Option<String>>>);
 #[cfg(not(target_os = "linux"))]
 fn icon_data_url(path: &str) -> Res<Option<String>> {
     use base64::Engine;
-    let icon = file_icon_provider::get_file_icon(path, 32).map_err(|e| e.to_string())?;
+    let icon = file_icon_provider::get_file_icon(path, 64).map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     {
         let mut enc = png::Encoder::new(&mut out, icon.width, icon.height);
@@ -264,9 +264,10 @@ fn icon_data_url(_: &str) -> Res<Option<String>> {
 #[tauri::command]
 async fn file_icon(cache: State<'_, IconCache>, path: String, is_dir: bool) -> Res<Option<String>> {
     let ext = std::path::Path::new(&path).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-    // most icons depend only on the file type; these carry their own artwork
+    // most file icons depend only on the type; these kinds, and every folder (Documents, Pictures
+    // and friends have their own artwork), are cached per path
     let per_file = matches!(ext.as_str(), "exe" | "lnk" | "ico" | "msi" | "url" | "app" | "scr" | "cur" | "appref-ms");
-    let key = if per_file { format!("p:{path}") } else if is_dir { "dir".to_string() } else { format!("e:{ext}") };
+    let key = if per_file || is_dir { format!("p:{path}") } else { format!("e:{ext}") };
     if let Some(hit) = cache.0.lock().unwrap().get(&key) {
         return Ok(hit.clone());
     }

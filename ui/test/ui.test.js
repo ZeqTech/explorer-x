@@ -33,8 +33,8 @@ test('misc helpers', () => {
   assert.deepEqual(invertMoves([{ from: 'a', to: 'b' }, { from: 'c', to: 'd' }]), [{ from: 'd', to: 'c' }, { from: 'b', to: 'a' }]);
 });
 
-test('icon keys share icons by type, except per-file kinds', () => {
-  assert.equal(iconKey({ isDir: true, ext: '', path: '/x' }), 'dir');
+test('icon keys share icons by file type, except folders and per-file kinds', () => {
+  assert.equal(iconKey({ isDir: true, ext: '', path: '/x' }), 'p:/x'); // special folders have their own icons
   assert.equal(iconKey({ isDir: false, ext: 'txt', path: '/a.txt' }), 'e:txt');
   assert.equal(iconKey({ isDir: false, ext: 'txt', path: '/b.txt' }), 'e:txt');
   assert.equal(iconKey({ isDir: false, ext: 'exe', path: '/a.exe' }), 'p:/a.exe');
