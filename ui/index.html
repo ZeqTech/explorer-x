@@ -30,6 +30,7 @@
     <option value="ext">Sort: Type</option><option value="size">Sort: Size</option>
   </select>
   <input id="zoom" type="range" min="32" max="128" value="64" title="Icon size (Ctrl+scroll)">
+  <button id="previewBtn" title="Preview pane (Alt+P)">Preview</button>
   <button id="hidden"title="Show hidden items (Ctrl+H)">Hidden</button>
   <button id="view" title="Toggle view">View: Details</button>
 </nav>
@@ -37,6 +38,7 @@
   <aside id="nav"></aside>
   <div id="resizer" title="Drag to resize (double-click to reset)"></div>
   <section id="files" tabindex="0"></section>
+  <aside id="preview" hidden></aside>
 </main>
 <footer id="status"><span id="count"></span><span id="selinfo"></span></footer>
 <div id="menu" hidden></div>

@@ -1,18 +1,18 @@
-import { fmtSize, fmtDate, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves } from './format.js';
+import { fmtSize, fmtDate, fmtDateTime, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves } from './format.js';
 import { UndoStack } from './undo.js';
-import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
+import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDialog, dialogOpen } from './dialogs.js';
 
 (() => {
   const api = window.fsapi;
   const $ = (id) => document.getElementById(id);
   const state = {
     cwd: null, history: [], hi: -1, entries: [], sel: new Set(), anchor: null,
-    sortKey: 'name', sortDir: 1, view: 'details', showHidden: false, cut: new Set(),
+    sortKey: 'name', sortDir: 1, view: 'details', showHidden: false, preview: false, cut: new Set(),
     mac: false, sep: '/', searchMode: false, pins: [], icon: 64, navw: 230,
   };
 
   // Per-user preferences, persisted in localStorage (best effort).
-  const PREF_KEYS = ['pins', 'icon', 'navw', 'view', 'sortKey', 'sortDir', 'showHidden'];
+  const PREF_KEYS = ['pins', 'icon', 'navw', 'view', 'sortKey', 'sortDir', 'showHidden', 'preview'];
   const savePrefs = () => {
     try { localStorage.setItem('explorerx', JSON.stringify(Object.fromEntries(PREF_KEYS.map((k) => [k, state[k]])))); } catch { /* ignore */ }
   };
@@ -250,7 +250,7 @@ import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
     const parent = state.view === 'details' ? host : $('grid');
     for (const e of shown) parent.appendChild(makeItem(e));
     if (!shown.length) { const m = document.createElement('div'); m.className = 'empty'; m.textContent = state.searchMode ? 'No matches.' : 'This folder is empty.'; host.appendChild(m); }
-    updateStatus();
+    updateStatus(); schedulePreview();
   }
 
   function makeItem(e) {
@@ -306,8 +306,8 @@ import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
   }
 
   function paintSel() {
-    document.querySelectorAll('[data-path].row.item, [data-path].tile').forEach((el) => el.classList.toggle('sel', state.sel.has(el.dataset.path)));
-    updateStatus();
+    document.querySelectorAll('[data-path].row.item, [data-path].tile').forEach((n) => n.classList.toggle('sel', state.sel.has(n.dataset.path)));
+    updateStatus(); schedulePreview();
   }
 
   function select(e, ev) {
@@ -391,6 +391,61 @@ import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
     inp.onclick = inp.ondblclick = (ev) => ev.stopPropagation();
   }
 
+  // ---- preview pane -----------------------------------------------------
+  const VIDEO = new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv']), AUDIO = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac']);
+  let previewTimer = 0, previewToken = 0;
+  const schedulePreview = () => { if (state.preview) { clearTimeout(previewTimer); previewTimer = setTimeout(updatePreview, 120); } };
+
+  const metaList = (rows) => el('dl', { className: 'meta' }, rows.filter((r) => r[1]).flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)]));
+
+  async function updatePreview() {
+    const host = $('preview');
+    const token = ++previewToken;
+    const put = (...nodes) => { if (token === previewToken) { host.textContent = ''; host.append(...nodes); } };
+    const sel = selected();
+    if (!sel.length) return put(el('p', { className: 'muted pad' }, 'Select a file to see its preview.'));
+    if (sel.length > 1) {
+      const bytes = sel.filter((e) => !e.isDir).reduce((s, e) => s + (e.size || 0), 0);
+      return put(el('h4', { className: 'ptitle' }, plural(sel.length, 'item') + ' selected'), metaList([['Files', plural(sel.filter((e) => !e.isDir).length, 'file')], ['Folders', plural(sel.filter((e) => e.isDir).length, 'folder')], ['Size of files', bytes ? fmtSize(bytes) : '']]));
+    }
+    const e = sel[0];
+    const rows = [['Type', typeOf(e)], ['Size', e.size != null ? fmtSize(e.size) : ''], ['Modified', e.mtime ? fmtDateTime(e.mtime) : ''], ['Created', e.ctime ? fmtDateTime(e.ctime) : ''], ['Location', parentOf(e.path)]];
+    const title = el('h4', { className: 'ptitle' }, e.name);
+    const fallback = el('div', { className: 'pbig' }, icon(e));
+    if (e.isDir) {
+      const contents = el('dd', {}, 'Calculating\u2026');
+      put(title, fallback, metaList(rows), el('dl', { className: 'meta' }, el('dt', {}, 'Contains'), contents));
+      api.dirStats(e.path).then((s) => { if (token === previewToken) contents.textContent = plural(s.files, 'file') + ', ' + plural(s.folders, 'folder') + ' \u00B7 ' + fmtSize(s.size); }).catch(() => { contents.textContent = '\u2014'; });
+      return;
+    }
+    let media = null;
+    if (IMG.has(e.ext) || VIDEO.has(e.ext) || AUDIO.has(e.ext)) {
+      const tag = IMG.has(e.ext) ? 'img' : VIDEO.has(e.ext) ? 'video' : 'audio';
+      media = el(tag, { className: 'pmedia', src: fileUrl(e.path) });
+      if (tag !== 'img') { media.controls = true; media.preload = 'metadata'; }
+      media.onerror = () => { if (token === previewToken) media.replaceWith(fallback); };
+    } else if (e.size) {
+      const text = await api.textPreview(e.path, 6000).catch(() => null);
+      if (token !== previewToken) return;
+      if (text != null) media = el('pre', { className: 'ptext' }, text + (e.size > 6000 ? '\n\u2026' : ''));
+    }
+    put(title, media || fallback, metaList(rows));
+  }
+
+  function togglePreview() {
+    state.preview = !state.preview;
+    $('preview').hidden = !state.preview; $('previewBtn').classList.toggle('on', state.preview);
+    savePrefs(); if (state.preview) updatePreview();
+  }
+
+  // ---- properties ---------------------------------------------------------
+  const doProperties = guard(async () => {
+    const sel = selected();
+    if (sel.length > 1) return multiPropertiesDialog(sel, { stats: api.dirStats });
+    const props = await api.properties(sel.length ? sel[0].path : state.cwd);
+    propertiesDialog(props, { stats: api.dirStats, onCopyPath: (p) => doCopyPath([p]), sep: state.sep });
+  });
+
   // ---- context menu -----------------------------------------------------
   function showCustomMenu(x, y, items) { showMenu(x, y, false, items); }
   function showMenu(x, y, onItem, custom) {
@@ -405,12 +460,14 @@ import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
       ['Open in terminal', () => doTerminal(selected()[0].path), one],
       null, ['Cut', () => doCopy(true)], ['Copy', () => doCopy(false)],
       ['Copy path', () => doCopyPath()], ['Copy name', doCopyName], ['Duplicate', doDuplicate], null,
-      ['Rename', startRename, one], [state.mac ? 'Move to Trash' : 'Delete', doDelete],
+      ['Rename', startRename, one], [state.mac ? 'Move to Trash' : 'Delete', doDelete], null,
+      ['Properties', doProperties],
     ] : [
       [state.pins.includes(state.cwd) ? 'Unpin this folder' : 'Pin this folder', () => togglePin(state.cwd)], null,
       ['New folder', doNewFolder], ['New text file', doNewFile], null,
       ['Open in terminal here', () => doTerminal(state.cwd)], ['Copy folder path', () => doCopyPath([state.cwd])], null,
-      ['Paste', doPaste], ['Refresh', refresh],
+      ['Paste', doPaste], ['Refresh', refresh], null,
+      ['Properties', doProperties],
     ]);
     for (const it of items) {
       if (!it) { m.appendChild(document.createElement('hr')); continue; }
@@ -434,6 +491,7 @@ import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
   $('paste').onclick = doPaste; $('renameBtn').onclick = startRename; $('delete').onclick = doDelete;
   $('sort').onchange = (e) => { state.sortKey = e.target.value; state.sortDir = 1; savePrefs(); render(); };
   $('hidden').onclick = () => { state.showHidden = !state.showHidden; $('hidden').classList.toggle('on', state.showHidden); savePrefs(); refresh(); };
+  $('previewBtn').onclick = togglePreview;
   $('view').onclick = () => { state.view = state.view === 'details' ? 'icons' : 'details'; $('view').textContent = 'View: ' + (state.view === 'details' ? 'Details' : 'Icons'); savePrefs(); render(); };
 
   const addr = $('address');
@@ -489,7 +547,9 @@ import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
       return;
     }
     const mod = state.mac ? ev.metaKey : ev.ctrlKey, k = ev.key.toLowerCase();
-    if (mod && k === 't') { ev.preventDefault(); newTab(); }
+    if (ev.altKey && k === 'p') { ev.preventDefault(); togglePreview(); }
+    else if ((ev.altKey && ev.key === 'Enter') || (state.mac && ev.metaKey && k === 'i')) { ev.preventDefault(); doProperties(); }
+    else if (mod && k === 't') { ev.preventDefault(); newTab(); }
     else if (ev.ctrlKey && k === 'w') { ev.preventDefault(); closeTab(activeTab); }
     else if (ev.ctrlKey && ev.key === 'Tab') { ev.preventDefault(); cycleTab(ev.shiftKey ? -1 : 1); }
     else if (mod && k === 'z') { ev.preventDefault(); if (ev.shiftKey) doRedo(); else doUndo(); }
@@ -527,6 +587,7 @@ import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
     if (state.mac) document.body.classList.add('mac');
     loadPrefs(); applyLayout();
     $('hidden').classList.toggle('on', state.showHidden);
+    $('preview').hidden = !state.preview; $('previewBtn').classList.toggle('on', state.preview);
     $('sort').value = state.sortKey;
     $('view').textContent = 'View: ' + (state.view === 'details' ? 'Details' : 'Icons');
     updateUndoUi();
