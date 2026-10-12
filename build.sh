@@ -4,6 +4,7 @@
 #   ./build.sh win        Windows installer + portable .exe   (output in dist/)
 #   ./build.sh mac        macOS universal .dmg + .zip          (must run on a Mac)
 #   ./build.sh all        win, plus mac when running on a Mac
+# Env: SKIP_TESTS=1 skips the test run; MAC_TARGET=aarch64-apple-darwin builds one Mac arch only.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]:-$0}")"
 
@@ -41,8 +42,12 @@ if [ "$HOST" = win ]; then NPM=npm.cmd; NPX=npx.cmd; else NPM=npm; NPX=npx; fi
 
 echo "==> Installing dependencies"
 "$NPM" install --no-audit --no-fund
-echo "==> Running tests"
-"$NPM" test
+if [ "${SKIP_TESTS:-0}" = 1 ]; then
+  echo "==> Skipping tests (SKIP_TESTS=1)"
+else
+  echo "==> Running tests"
+  "$NPM" test
+fi
 
 BUNDLE=src-tauri/target/release/bundle
 rm -rf dist && mkdir -p dist
@@ -52,7 +57,7 @@ build_win() {
   "$NPX" tauri build --bundles nsis
   cp "$BUNDLE"/nsis/*.exe dist/
   VERSION=$(node -p "require('./package.json').version")
-  cp src-tauri/target/release/explorer-x.exe "dist/Explorer X ${VERSION} portable.exe"
+  cp src-tauri/target/release/explorer-x.exe "dist/Explorer X ${VERSION}.exe"
 }
 
 build_mac() {
@@ -60,10 +65,13 @@ build_mac() {
     echo "!! macOS builds require running on a Mac. Skipping." >&2
     return 1
   fi
-  echo "==> Building macOS (universal dmg + zip)"
+  # MAC_TARGET=aarch64-apple-darwin (or x86_64-apple-darwin) builds one architecture in about
+  # half the time; the default is a universal binary that runs on both.
+  MAC_TARGET="${MAC_TARGET:-universal-apple-darwin}"
+  echo "==> Building macOS ($MAC_TARGET, dmg + zip)"
   rustup target add aarch64-apple-darwin x86_64-apple-darwin
-  "$NPX" tauri build --target universal-apple-darwin --bundles app,dmg
-  M=src-tauri/target/universal-apple-darwin/release/bundle
+  "$NPX" tauri build --target "$MAC_TARGET" --bundles app,dmg
+  M=src-tauri/target/$MAC_TARGET/release/bundle
   cp "$M"/dmg/*.dmg dist/
   ditto -c -k --keepParent "$M/macos/Explorer X.app" "dist/Explorer X.app.zip"
 }

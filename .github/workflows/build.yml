@@ -7,6 +7,16 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A newer push to the same branch makes an older still-running build pointless.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Tags build a universal Mac app (Intel + Apple Silicon); every other build only compiles the
+  # runner's own architecture, which is about twice as fast.
+  MAC_TARGET: ${{ startsWith(github.ref, 'refs/tags/v') && 'universal-apple-darwin' || 'aarch64-apple-darwin' }}
+
 jobs:
   build:
     strategy:
@@ -15,26 +25,49 @@ jobs:
         include:
           - os: windows-latest
             target: win
+            skip_tests: '0'
           - os: macos-latest
             target: mac
+            # The tests exercise cross-platform code that already runs on the Windows job.
+            skip_tests: '1'
     runs-on: ${{ matrix.os }}
+    env:
+      SKIP_TESTS: ${{ matrix.skip_tests }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      # Version comes from rust-toolchain.toml; the Mac job also needs both Apple targets.
+          cache: npm            # caches ~/.npm, keyed on package-lock.json
+
+      # Version comes from rust-toolchain.toml; the Mac job also needs the Apple targets.
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.91.0"
           targets: ${{ matrix.target == 'mac' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      # Caches ~/.cargo (downloaded crates) and src-tauri/target (compiled dependencies),
+      # keyed on Cargo.lock + toolchain. Only main writes the cache: tag and PR builds restore
+      # it, and the 10 GB repo cache limit is not filled with per-branch copies.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Tauri downloads NSIS and its helper DLL into this folder on every Windows build.
+      - name: Cache Tauri bundler tools
+        if: matrix.target == 'win'
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\tauri
+          key: tauri-tools-${{ runner.os }}-v1
+
       - name: Build
         shell: bash
-        run: sh ./build.sh ${{ matrix.target }}
+        run: ./build.sh ${{ matrix.target }}
+
       - uses: actions/upload-artifact@v4
         with:
           name: explorer-x-${{ matrix.target }}

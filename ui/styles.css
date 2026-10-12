@@ -26,6 +26,8 @@ button.on { background: var(--sel); }
 .spacer { flex: 1; }
 main { flex: 1; display: flex; min-height: 0; }
 :root { --navw: 230px; --icon: 64px; }
+/* Details view icons follow the same size slider: 32px -> 14px ... 128px -> 41px */
+:root { --row-icon: calc(14px + (var(--icon) - 32px) * 0.28); }
 #nav { width: var(--navw); flex: none; overflow: auto; padding: 6px 0; }
 #resizer { width: 5px; margin-left: -2px; flex: none; cursor: col-resize; border-left: 1px solid var(--line); z-index: 2; }
 #resizer:hover, body.resizing #resizer { border-left: 3px solid var(--accent); }
@@ -47,7 +49,9 @@ body.resizing { cursor: col-resize; }
 .row.item.cut { opacity: .5; }
 .row.item.drop { outline: 2px solid var(--accent); outline-offset: -2px; }
 .num { text-align: right; }
-.ic { display: inline-block; width: 26px; font-size: 20px; line-height: 1.2; text-align: center; margin-right: 8px; }
+.ic { display: inline-block; width: calc(var(--row-icon) * 1.25); font-size: var(--row-icon); line-height: 1.2; text-align: center; margin-right: 8px; flex: none; }
+.nameCell { display: flex; align-items: center; min-width: 0; }
+.nameCell .nm { overflow: hidden; text-overflow: ellipsis; }
 .row.item { padding-top: 5px; padding-bottom: 5px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--icon) + 40px), 1fr)); gap: 6px; padding: 10px; }
 .tile .big { height: var(--icon); display: flex; align-items: center; justify-content: center; }
@@ -58,7 +62,7 @@ body.resizing { cursor: col-resize; }
 .tile.cut { opacity: .5; }
 .tile .big { font-size: calc(var(--icon) * .8); line-height: 1; }
 .tile .nm { font-size: 12px; max-height: 3.6em; overflow: hidden; }
-.rename { width: 100%; font: inherit; background: var(--bg); border: 1px solid var(--accent); }
+.rename { flex: 1; min-width: 0; width: 100%; font: inherit; background: var(--bg); border: 1px solid var(--accent); }
 #status { display: flex; justify-content: space-between; padding: 4px 12px; border-top: 1px solid var(--line); background: var(--bar); color: var(--muted); }
 #menu { position: fixed; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.25); padding: 4px; min-width: 190px; z-index: 10; }
 #menu div { padding: 5px 14px; border-radius: 4px; cursor: pointer; }
