@@ -76,7 +76,7 @@ jobs:
 
   release:
     # Publish only when the workflow is manually dispatched from a version tag.
-    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     permissions:
