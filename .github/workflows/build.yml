@@ -29,7 +29,7 @@ jobs:
           - os: macos-latest
             target: mac
             # The tests exercise cross-platform code that already runs on the Windows job.
-            skip_tests: '1'
+            skip_tests: '0'
     runs-on: ${{ matrix.os }}
     env:
       SKIP_TESTS: ${{ matrix.skip_tests }}

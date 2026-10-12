@@ -94,6 +94,54 @@ import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
     return done;
   }
 
+  // ---- tabs --------------------------------------------------------------
+  // Each tab has its own folder and back/forward history; sort, view and pins are shared.
+  const tabs = [{ cwd: null, history: [], hi: -1 }];
+  let activeTab = 0;
+  const syncTab = () => { Object.assign(tabs[activeTab], { cwd: state.cwd, history: state.history, hi: state.hi }); renderTabs(); };
+
+  function renderTabs() {
+    const bar = $('tabs'); bar.textContent = '';
+    tabs.forEach((t, i) => {
+      const label = t.cwd ? baseName(t.cwd) : '…';
+      const tab = document.createElement('div');
+      tab.className = 'tab' + (i === activeTab ? ' active' : ''); tab.title = t.cwd || '';
+      const name = document.createElement('span'); name.className = 'tabname'; name.textContent = label;
+      const x = document.createElement('button'); x.className = 'tabclose'; x.textContent = '×'; x.title = 'Close tab (Ctrl+W)';
+      x.onclick = (ev) => { ev.stopPropagation(); closeTab(i); };
+      tab.onclick = () => switchTab(i);
+      tab.onauxclick = (ev) => { if (ev.button === 1) { ev.preventDefault(); closeTab(i); } };
+      tab.append(name, x);
+      bar.appendChild(tab);
+    });
+    const plus = document.createElement('button'); plus.className = 'tabnew'; plus.textContent = '+'; plus.title = 'New tab (Ctrl+T)';
+    plus.onclick = () => newTab();
+    bar.appendChild(plus);
+  }
+
+  function loadTab(i) {
+    activeTab = i;
+    const t = tabs[i];
+    state.history = t.history; state.hi = t.hi;
+    renderTabs();
+    return go(t.cwd, false);
+  }
+  function switchTab(i) { if (i !== activeTab && tabs[i]) { syncTab(); return loadTab(i); } }
+  // Opens `path` (default: the current folder) in a new tab; `activate: false` opens it in the background.
+  async function newTab(path = state.cwd, activate = true) {
+    syncTab();
+    tabs.push({ cwd: path, history: [path], hi: 0 });
+    if (activate) await loadTab(tabs.length - 1); else renderTabs();
+  }
+  async function closeTab(i) {
+    if (tabs.length === 1) return;
+    syncTab();
+    tabs.splice(i, 1);
+    if (i < activeTab) { activeTab--; renderTabs(); return; }
+    if (i === activeTab) await loadTab(Math.min(i, tabs.length - 1)); else renderTabs();
+  }
+  const cycleTab = (d) => switchTab((activeTab + d + tabs.length) % tabs.length);
+
   // ---- navigation -------------------------------------------------------
   async function go(dir, push = true) {
     try {
@@ -102,7 +150,7 @@ import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
     state.cwd = dir; state.sel.clear(); state.anchor = null; state.searchMode = false; $('search').value = '';
     if (push) { state.history = state.history.slice(0, state.hi + 1); state.history.push(dir); state.hi = state.history.length - 1; }
     document.title = dir.split(/[\\/]/).filter(Boolean).pop() || dir;
-    render(); renderCrumbs(); renderNavActive();
+    render(); renderCrumbs(); renderNavActive(); syncTab();
   }
   const refresh = () => go(state.cwd, false);
   const back = () => { if (state.hi > 0) go(state.history[--state.hi], false); };
@@ -141,6 +189,7 @@ import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
           ev.preventDefault();
           showCustomMenu(ev.clientX, ev.clientY, [
             ['Open', () => go(it.path)],
+            ['Open in new tab', () => newTab(it.path)],
             ['Open in new window', guard(() => api.newWindow(it.path))],
             ['Open in terminal', () => doTerminal(it.path)],
             ['Copy path', () => doCopyPath([it.path])],
@@ -229,6 +278,7 @@ import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
     }
     el.onclick = (ev) => select(e, ev);
     el.ondblclick = guard(() => openEntry(e));
+    el.onauxclick = (ev) => { if (ev.button === 1 && e.isDir) { ev.preventDefault(); newTab(e.path, false); } };
     el.oncontextmenu = (ev) => { ev.preventDefault(); ev.stopPropagation(); if (!state.sel.has(e.path)) select(e, {}); showMenu(ev.clientX, ev.clientY, true); };
     el.ondragstart = (ev) => { if (!state.sel.has(e.path)) select(e, {}); ev.dataTransfer.setData('text/x-explorerx', JSON.stringify([...state.sel])); ev.dataTransfer.effectAllowed = 'copyMove'; };
     if (e.isDir) {
@@ -349,6 +399,7 @@ import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
     const items = custom || (onItem ? [
       ['Open', () => one && openEntry(selected()[0]), one],
       [pinned ? 'Unpin from sidebar' : 'Pin to sidebar', () => togglePin(selected()[0].path), oneDir],
+      ['Open in new tab', () => newTab(selected()[0].path, false), oneDir],
       ['Open in new window', () => api.newWindow(selected()[0].path), oneDir],
       [state.mac ? 'Reveal in Finder' : 'Show in Explorer', () => api.reveal(selected()[0].path), one],
       ['Open in terminal', () => doTerminal(selected()[0].path), one],
@@ -438,7 +489,10 @@ import { conflictDialog, progressDialog, dialogOpen } from './dialogs.js';
       return;
     }
     const mod = state.mac ? ev.metaKey : ev.ctrlKey, k = ev.key.toLowerCase();
-    if (mod && k === 'z') { ev.preventDefault(); if (ev.shiftKey) doRedo(); else doUndo(); }
+    if (mod && k === 't') { ev.preventDefault(); newTab(); }
+    else if (ev.ctrlKey && k === 'w') { ev.preventDefault(); closeTab(activeTab); }
+    else if (ev.ctrlKey && ev.key === 'Tab') { ev.preventDefault(); cycleTab(ev.shiftKey ? -1 : 1); }
+    else if (mod && k === 'z') { ev.preventDefault(); if (ev.shiftKey) doRedo(); else doUndo(); }
     else if (mod && k === 'y') { ev.preventDefault(); doRedo(); }
     else if (mod && ev.shiftKey && k === 'c') doCopyPath();
     else if (mod && k === 'c') doCopy(false);

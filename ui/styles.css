@@ -90,3 +90,13 @@ body.resizing { cursor: col-resize; }
 .prow:last-of-type { border-bottom: 0; }
 .plabel { color: var(--muted); }
 .prow span:last-child { word-break: break-all; }
+
+/* ---- tabs ---- */
+#tabs { display: flex; align-items: flex-end; gap: 2px; padding: 4px 8px 0; background: var(--bar); border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tab { display: flex; align-items: center; gap: 6px; max-width: 200px; min-width: 90px; padding: 5px 6px 5px 12px; border: 1px solid transparent; border-bottom: 0; border-radius: 6px 6px 0 0; cursor: default; }
+.tab:hover { background: var(--hover); }
+.tab.active { background: var(--bg); border-color: var(--line); margin-bottom: -1px; padding-bottom: 6px; }
+.tabname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tabclose, .tabnew { padding: 0 6px; line-height: 18px; border-radius: 4px; color: var(--muted); }
+.tabnew { font-size: 16px; margin-bottom: 3px; }
+.tabclose:hover, .tabnew:hover { background: var(--line); color: var(--fg); }
