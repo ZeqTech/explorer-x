@@ -30,6 +30,11 @@ echo "Using node $(node -v) from $(command -v node)"
 
 # Rust (rustup puts cargo in ~/.cargo/bin). rust-toolchain.toml pins the version.
 export PATH="$HOME/.cargo/bin:$PATH"
+# Homebrew's rustup is keg-only; put its proxies ahead of a standalone Homebrew "rust" rustc,
+# which ignores rust-toolchain.toml and lacks the cross-compile targets.
+for d in /opt/homebrew/opt/rustup/bin /usr/local/opt/rustup/bin; do
+  [ -d "$d" ] && PATH="$d:$PATH"
+done
 command -v cargo >/dev/null || {
   echo "Rust not found. Install it from https://rustup.rs, then retry." >&2
   exit 1
