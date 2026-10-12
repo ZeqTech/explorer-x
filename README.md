@@ -7,6 +7,7 @@
 ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0067c0)
 ![Tauri](https://img.shields.io/badge/built%20with-Tauri%202-ffc131)
 ![Size](https://img.shields.io/badge/installer-~1%20MB-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-green)
 ![Status](https://img.shields.io/badge/status-early%20release-orange)
 
 </div>
@@ -139,8 +140,8 @@ The UI runs in the system webview (WebView2 on Windows, WKWebView on macOS) with
 
 ## 🤝 Contributing
 
-Issues and pull requests are welcome. Please run `npm test` before submitting.
+Explorer X is fully open source and contributions are very welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started, and please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Found a security problem? See [SECURITY.md](SECURITY.md).
 
 ## 📄 License
 
-No license has been chosen yet. Add a `LICENSE` file (for example MIT) before accepting contributions.
+[MIT](LICENSE) © Explorer X contributors. Use it, change it, ship it.

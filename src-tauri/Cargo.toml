@@ -3,6 +3,7 @@ name = "explorer-x"
 version = "0.1.0"
 description = "Cross-platform file explorer modeled on Windows Explorer"
 edition = "2021"
+license = "MIT"
 rust-version = "1.90"
 
 [lib]
