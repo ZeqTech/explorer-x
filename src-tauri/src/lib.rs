@@ -128,6 +128,53 @@ fn clipboard_read() -> Res<Option<serde_json::Value>> {
     Ok(serde_json::from_str::<serde_json::Value>(&text).ok().filter(|v| v["explorerX"] == true))
 }
 
+/// Plain text (e.g. a path) on the system clipboard.
+#[tauri::command]
+fn clipboard_text(text: String) -> Res<()> {
+    arboard::Clipboard::new().and_then(|mut c| c.set_text(text)).map_err(|e| e.to_string())
+}
+
+/// Opens a terminal in `path` (or in its parent folder when `path` is a file).
+#[tauri::command]
+fn open_terminal(path: String) -> Res<()> {
+    let p = std::path::Path::new(&path);
+    let dir = if p.is_dir() { p } else { p.parent().ok_or("No parent folder")? };
+    launch_terminal(dir)
+}
+
+fn launch_terminal(dir: &std::path::Path) -> Res<()> {
+    use std::process::Command;
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // Windows Terminal if installed, otherwise a plain console window.
+        if Command::new("wt.exe").arg("-d").arg(dir).spawn().is_ok() {
+            return Ok(());
+        }
+        return Command::new("cmd.exe")
+            .args(["/C", "start", "", "/D"])
+            .arg(dir)
+            .arg("cmd.exe")
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW for the helper; "start" opens the real console
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return Command::new("open").args(["-a", "Terminal"]).arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string());
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        for t in ["x-terminal-emulator", "gnome-terminal", "konsole", "xfce4-terminal", "xterm"] {
+            if Command::new(t).current_dir(dir).spawn().is_ok() {
+                return Ok(());
+            }
+        }
+        Err("No terminal emulator found".into())
+    }
+}
+
 // ---- app ------------------------------------------------------------------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -147,7 +194,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_dir, copy_into, move_into, rename_path, make_dir, new_file, search, drives, quick_access,
             trash_paths, open_path, reveal_path, is_dir, home_dir, platform, new_window, clipboard_write,
-            clipboard_read
+            clipboard_read, clipboard_text, open_terminal
         ])
         .build(tauri::generate_context!())
         .expect("error while building Explorer X");

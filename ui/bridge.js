@@ -27,6 +27,8 @@
     newWindow: (path) => call('new_window', { path }),
     clipboardWrite: (paths, cut) => call('clipboard_write', { paths, cut }),
     clipboardRead: () => call('clipboard_read'),
+    copyText: (text) => call('clipboard_text', { text }),
+    openTerminal: (path) => call('open_terminal', { path }),
     // URL the webview can use to display a local file (used for image thumbnails)
     fileUrl: (path) => convertFileSrc(path),
     // Folder this window was opened for, if any

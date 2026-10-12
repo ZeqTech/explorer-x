@@ -84,7 +84,18 @@
       const h = document.createElement('h4'); h.textContent = title; nav.appendChild(h);
       for (const it of items) {
         const d = document.createElement('div'); d.textContent = it.name; d.title = it.path; d.dataset.path = it.path;
-        if (pinned) { d.classList.add('pin'); d.oncontextmenu = (ev) => { ev.preventDefault(); showCustomMenu(ev.clientX, ev.clientY, [['Unpin from sidebar', () => togglePin(it.path)]]); }; }
+        if (pinned) d.classList.add('pin');
+        d.oncontextmenu = (ev) => {
+          ev.preventDefault();
+          showCustomMenu(ev.clientX, ev.clientY, [
+            ['Open', () => go(it.path)],
+            ['Open in new window', guard(() => api.newWindow(it.path))],
+            ['Open in terminal', () => doTerminal(it.path)],
+            ['Copy path', () => doCopyPath([it.path])],
+            null,
+            [state.pins.includes(it.path) ? 'Unpin from sidebar' : 'Pin to sidebar', () => togglePin(it.path)],
+          ]);
+        };
         d.onclick = () => go(it.path);
         d.ondragover = (ev) => ev.preventDefault();
         d.ondrop = guard(async (ev) => { ev.preventDefault(); await dropOnto(it.path, ev); });
@@ -226,6 +237,22 @@
     const s = selected(); if (!s.length) return;
     await api.trash(s.map((e) => e.path)); await refresh();
   });
+  const doTerminal = guard(async (p) => { await api.openTerminal(p); });
+  const doCopyPath = guard(async (paths) => {
+    paths = paths || (state.sel.size ? selected().map((e) => e.path) : [state.cwd]);
+    await api.copyText(paths.join('\n'));
+    toast(paths.length > 1 ? 'Copied ' + paths.length + ' paths' : 'Copied path');
+  });
+  const doCopyName = guard(async () => {
+    const names = selected().map((e) => e.name); if (!names.length) return;
+    await api.copyText(names.join('\n')); toast(names.length > 1 ? 'Copied ' + names.length + ' names' : 'Copied name');
+  });
+  // Copies each item next to the original; name collisions get " (2)", " (3)", ...
+  const doDuplicate = guard(async () => {
+    const s = selected(); if (!s.length) return;
+    for (const e of s) await api.copy([e.path], parentOf(e.path));
+    await refresh();
+  });
   const doNewFolder = guard(async () => { const p = await api.mkdir(state.cwd); await refresh(); state.sel = new Set([p]); paintSel(); startRename(); });
   const doNewFile = guard(async () => { const p = await api.newFile(state.cwd); await refresh(); state.sel = new Set([p]); paintSel(); startRename(); });
 
@@ -256,11 +283,15 @@
       [pinned ? 'Unpin from sidebar' : 'Pin to sidebar', () => togglePin(selected()[0].path), oneDir],
       ['Open in new window', () => api.newWindow(selected()[0].path), oneDir],
       [state.mac ? 'Reveal in Finder' : 'Show in Explorer', () => api.reveal(selected()[0].path), one],
-      null, ['Cut', () => doCopy(true)], ['Copy', () => doCopy(false)], null,
+      ['Open in terminal', () => doTerminal(selected()[0].path), one],
+      null, ['Cut', () => doCopy(true)], ['Copy', () => doCopy(false)],
+      ['Copy path', () => doCopyPath()], ['Copy name', doCopyName], ['Duplicate', doDuplicate], null,
       ['Rename', startRename, one], [state.mac ? 'Move to Trash' : 'Delete', doDelete],
     ] : [
       [state.pins.includes(state.cwd) ? 'Unpin this folder' : 'Pin this folder', () => togglePin(state.cwd)], null,
-      ['New folder', doNewFolder], ['New text file', doNewFile], null, ['Paste', doPaste], ['Refresh', refresh],
+      ['New folder', doNewFolder], ['New text file', doNewFile], null,
+      ['Open in terminal here', () => doTerminal(state.cwd)], ['Copy folder path', () => doCopyPath([state.cwd])], null,
+      ['Paste', doPaste], ['Refresh', refresh],
     ]);
     for (const it of items) {
       if (!it) { m.appendChild(document.createElement('hr')); continue; }
@@ -337,7 +368,8 @@
       return;
     }
     const mod = state.mac ? ev.metaKey : ev.ctrlKey, k = ev.key.toLowerCase();
-    if (mod && k === 'c') doCopy(false);
+    if (mod && ev.shiftKey && k === 'c') doCopyPath();
+    else if (mod && k === 'c') doCopy(false);
     else if (mod && k === 'x') doCopy(true);
     else if (mod && k === 'v') doPaste();
     else if (mod && k === 'a') { ev.preventDefault(); state.sel = new Set(shown.map((e) => e.path)); paintSel(); }
