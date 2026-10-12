@@ -94,7 +94,7 @@ npm test       # Rust tests (filesystem layer) + UI unit tests
 
 ```bash
 ./build.sh win    # Windows installer + portable .exe  -> dist/
-./build.sh mac    # macOS universal .dmg + .zip (must run on a Mac)
+./build.sh mac    # macOS universal .dmg (must run on a Mac)
 ./build.sh all    # everything the current machine can build
 ```
 

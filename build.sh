@@ -2,7 +2,7 @@
 # Build Explorer X (Tauri) installers.
 #   ./build.sh            build for the current OS
 #   ./build.sh win        Windows installer + portable .exe   (output in dist/)
-#   ./build.sh mac        macOS universal .dmg + .zip          (must run on a Mac)
+#   ./build.sh mac        macOS universal .dmg                (must run on a Mac)
 #   ./build.sh all        win, plus mac when running on a Mac
 # Env: SKIP_TESTS=1 skips the test run; MAC_TARGET=aarch64-apple-darwin builds one Mac arch only.
 set -euo pipefail
@@ -68,12 +68,11 @@ build_mac() {
   # MAC_TARGET=aarch64-apple-darwin (or x86_64-apple-darwin) builds one architecture in about
   # half the time; the default is a universal binary that runs on both.
   MAC_TARGET="${MAC_TARGET:-universal-apple-darwin}"
-  echo "==> Building macOS ($MAC_TARGET, dmg + zip)"
+  echo "==> Building macOS ($MAC_TARGET, dmg)"
   rustup target add aarch64-apple-darwin x86_64-apple-darwin
-  "$NPX" tauri build --target "$MAC_TARGET" --bundles app,dmg
+  "$NPX" tauri build --target "$MAC_TARGET" --bundles dmg
   M=src-tauri/target/$MAC_TARGET/release/bundle
   cp "$M"/dmg/*.dmg dist/
-  ditto -c -k --keepParent "$M/macos/Explorer X.app" "dist/Explorer X.app.zip"
 }
 
 case "$TARGET" in
