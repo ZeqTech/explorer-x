@@ -26,6 +26,7 @@ Explorer X takes the workflow of Windows File Explorer (breadcrumb address bar, 
 | ↔️ **Resizable sidebar** | Drag the divider; double-click to reset. Width is remembered |
 | 🖼️ **Views** | Details or icon view, sortable columns, adjustable icon size |
 | 🔍 **Thumbnails** | Image previews right in the icon view |
+| 🖱️ **Right-click menus** | Open, open in terminal, copy path / name, duplicate, pin, show in Explorer / Finder, on files, folders, empty space and the sidebar |
 | ✂️ **File operations** | Cut, copy, paste, rename, new folder / file, drag-and-drop (hold Ctrl/Alt to copy) |
 | 🗑️ **Safe delete** | Items go to the Recycle Bin / Trash, never permanently deleted |
 | 🔎 **Search** | Recursive filename search in the current folder |
@@ -68,6 +69,7 @@ npm test       # Rust unit tests for the filesystem layer
 | Search | `Ctrl+F` | `Cmd+F` |
 | Show hidden files | `Ctrl+H` | `Cmd+H` |
 | Rename | `F2` | `F2` |
+| Copy path | `Ctrl+Shift+C` | `Cmd+Shift+C` |
 | Delete / Move to Trash | `Delete` | `Cmd+Backspace` |
 | Open | `Enter` | `Enter` or `Cmd+↓` |
 | Up one folder | `Alt+↑` or `Backspace` | `Cmd+↑` |
