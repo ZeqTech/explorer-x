@@ -1,0 +1,46 @@
+{
+  "name": "explorer-x",
+  "version": "0.1.0",
+  "description": "Cross-platform (Windows/macOS/Linux) file explorer modeled on Windows Explorer",
+  "main": "src/main.js",
+  "author": "Explorer X",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/fs-service.test.js",
+    "build": "bash build.sh"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.explorerx.app",
+    "productName": "Explorer X",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": false
+    }
+  }
+}
