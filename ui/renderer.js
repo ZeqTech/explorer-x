@@ -1,3 +1,6 @@
+import { fmtSize, fmtDate, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves } from './format.js';
+import { UndoStack } from './undo.js';
+
 (() => {
   const api = window.fsapi;
   const $ = (id) => document.getElementById(id);
@@ -23,24 +26,44 @@
     $('zoom').value = state.icon;
   };
 
-  const fmtSize = (n) => {
-    if (n == null) return '';
-    const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0;
-    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-    return (i ? n.toFixed(n < 10 ? 1 : 0) : n) + ' ' + u[i];
-  };
-  const fmtDate = (ms) => new Date(ms).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
-  const typeOf = (e) => (e.isDir ? 'File folder' : e.ext ? e.ext.toUpperCase() + ' file' : 'File');
   const icon = (e) => (e.isDir ? '\u{1F4C1}' : { png: '\u{1F5BC}', jpg: '\u{1F5BC}', jpeg: '\u{1F5BC}', gif: '\u{1F5BC}', mp3: '\u{1F3B5}', wav: '\u{1F3B5}', mp4: '\u{1F39E}', mkv: '\u{1F39E}', zip: '\u{1F5DC}', pdf: '\u{1F4D5}' }[e.ext] || '\u{1F4C4}');
-  const parentOf = (p) => {
-    const m = p.replace(/[\\/]+$/, '').match(/^(.*)[\\/][^\\/]*$/);
-    if (!m) return null;
-    if (/^[A-Za-z]:$/.test(m[1])) return m[1] + state.sep;
-    return m[1] === '' ? state.sep : m[1];
-  };
-  const joinPath = (d, n) => (d.endsWith(state.sep) ? d + n : d + state.sep + n);
+  const parentOf = (p) => parentOfSep(p, state.sep);
+  const joinPath = (d, n) => joinPathSep(d, n, state.sep);
   const toast = (msg) => { $('selinfo').textContent = msg; };
   const guard = (fn) => async (...a) => { try { return await fn(...a); } catch (e) { toast('Error: ' + e.message); } };
+
+  // ---- undo / redo ------------------------------------------------------
+  const undoStack = new UndoStack();
+  const updateUndoUi = () => {
+    $('undo').disabled = !undoStack.canUndo;
+    $('redo').disabled = !undoStack.canRedo;
+    $('undo').title = undoStack.canUndo ? 'Undo ' + undoStack.undoLabel + ' (Ctrl+Z)' : 'Nothing to undo';
+    $('redo').title = undoStack.canRedo ? 'Redo ' + undoStack.redoLabel + ' (Ctrl+Y)' : 'Nothing to redo';
+  };
+  const record = (entry) => { undoStack.push(entry); updateUndoUi(); };
+  const doUndo = guard(async () => {
+    let label = null;
+    try { label = await undoStack.undo(); } finally { updateUndoUi(); await refresh(); }
+    if (label) toast('Undid: ' + label);
+  });
+  const doRedo = guard(async () => {
+    let label = null;
+    try { label = await undoStack.redo(); } finally { updateUndoUi(); await refresh(); }
+    if (label) toast('Redid: ' + label);
+  });
+
+  // Copies or moves `srcs` into `destDir` and records how to undo it. Resolves to [{from, to}].
+  async function transfer(kind, srcs, destDir) {
+    const label = (kind === 'move' ? 'Move ' : 'Copy ') + plural(srcs.length, 'item');
+    let done = await api[kind](srcs, destDir);
+    if (!done.length) return done;
+    if (kind === 'move') {
+      record({ label, undo: () => api.renameMany(invertMoves(done)), redo: () => api.renameMany(done) });
+    } else {
+      record({ label, undo: () => api.trash(done.map((m) => m.to)), redo: async () => { done = await api.copy(srcs, destDir); } });
+    }
+    return done;
+  }
 
   // ---- navigation -------------------------------------------------------
   async function go(dir, push = true) {
@@ -190,7 +213,7 @@
   async function dropOnto(dest, ev) {
     const raw = ev.dataTransfer.getData('text/x-explorerx'); if (!raw) return;
     const paths = JSON.parse(raw);
-    if (ev.ctrlKey || ev.altKey) await api.copy(paths, dest); else await api.move(paths, dest);
+    await transfer(ev.ctrlKey || ev.altKey ? 'copy' : 'move', paths, dest);
     await refresh();
   }
 
@@ -230,12 +253,16 @@
   });
   const doPaste = guard(async () => {
     const c = await api.clipboardRead(); if (!c || !c.paths.length) return;
-    if (c.cut) { await api.move(c.paths, state.cwd); await api.clipboardWrite([], false); } else await api.copy(c.paths, state.cwd);
+    await transfer(c.cut ? 'move' : 'copy', c.paths, state.cwd);
+    if (c.cut) await api.clipboardWrite([], false);
     state.cut = new Set(); await refresh();
   });
   const doDelete = guard(async () => {
     const s = selected(); if (!s.length) return;
-    await api.trash(s.map((e) => e.path)); await refresh();
+    const paths = s.map((e) => e.path);
+    await api.trash(paths);
+    record({ label: 'Delete ' + plural(paths.length, 'item'), undo: () => api.restoreTrashed(paths), redo: () => api.trash(paths) });
+    await refresh();
   });
   const doTerminal = guard(async (p) => { await api.openTerminal(p); });
   const doCopyPath = guard(async (paths) => {
@@ -250,11 +277,17 @@
   // Copies each item next to the original; name collisions get " (2)", " (3)", ...
   const doDuplicate = guard(async () => {
     const s = selected(); if (!s.length) return;
-    for (const e of s) await api.copy([e.path], parentOf(e.path));
+    const byParent = new Map();
+    for (const e of s) byParent.set(parentOf(e.path), [...(byParent.get(parentOf(e.path)) || []), e.path]);
+    for (const [parent, paths] of byParent) await transfer('copy', paths, parent);
     await refresh();
   });
-  const doNewFolder = guard(async () => { const p = await api.mkdir(state.cwd); await refresh(); state.sel = new Set([p]); paintSel(); startRename(); });
-  const doNewFile = guard(async () => { const p = await api.newFile(state.cwd); await refresh(); state.sel = new Set([p]); paintSel(); startRename(); });
+  const createNew = (isDir) => guard(async () => {
+    const p = await (isDir ? api.mkdir(state.cwd) : api.newFile(state.cwd));
+    record({ label: isDir ? 'New folder' : 'New file', undo: () => api.trash([p]), redo: () => api.createPath(p, isDir) });
+    await refresh(); state.sel = new Set([p]); paintSel(); startRename();
+  });
+  const doNewFolder = createNew(true), doNewFile = createNew(false);
 
   function startRename() {
     const s = selected(); if (s.length !== 1) return;
@@ -265,7 +298,12 @@
     let done = false;
     const finish = guard(async (commit) => {
       if (done) return; done = true;
-      if (commit && inp.value !== s[0].name) { const np = await api.rename(s[0].path, inp.value); state.sel = new Set([np]); }
+      if (commit && inp.value !== s[0].name) {
+        const oldPath = s[0].path, oldName = s[0].name, newName = inp.value;
+        const np = await api.rename(oldPath, newName);
+        record({ label: 'Rename "' + oldName + '"', undo: () => api.rename(np, oldName), redo: () => api.rename(oldPath, newName) });
+        state.sel = new Set([np]);
+      }
       await refresh();
     });
     inp.onkeydown = (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') finish(true); if (ev.key === 'Escape') finish(false); };
@@ -310,6 +348,7 @@
 
   // ---- toolbar ----------------------------------------------------------
   $('back').onclick = back; $('fwd').onclick = fwd; $('up').onclick = up; $('refresh').onclick = refresh;
+  $('undo').onclick = doUndo; $('redo').onclick = doRedo;
   $('newFolder').onclick = doNewFolder; $('cut').onclick = () => doCopy(true); $('copy').onclick = () => doCopy(false);
   $('paste').onclick = doPaste; $('renameBtn').onclick = startRename; $('delete').onclick = doDelete;
   $('sort').onchange = (e) => { state.sortKey = e.target.value; state.sortDir = 1; savePrefs(); render(); };
@@ -368,7 +407,9 @@
       return;
     }
     const mod = state.mac ? ev.metaKey : ev.ctrlKey, k = ev.key.toLowerCase();
-    if (mod && ev.shiftKey && k === 'c') doCopyPath();
+    if (mod && k === 'z') { ev.preventDefault(); if (ev.shiftKey) doRedo(); else doUndo(); }
+    else if (mod && k === 'y') { ev.preventDefault(); doRedo(); }
+    else if (mod && ev.shiftKey && k === 'c') doCopyPath();
     else if (mod && k === 'c') doCopy(false);
     else if (mod && k === 'x') doCopy(true);
     else if (mod && k === 'v') doPaste();
@@ -403,6 +444,7 @@
     $('hidden').classList.toggle('on', state.showHidden);
     $('sort').value = state.sortKey;
     $('view').textContent = 'View: ' + (state.view === 'details' ? 'Details' : 'Icons');
+    updateUndoUi();
     await renderNav();
     await go(api.startPath() || await api.home());
     api.onOpenPath((p) => go(p));

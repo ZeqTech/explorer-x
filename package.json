@@ -7,9 +7,11 @@
   "scripts": {
     "start": "tauri dev",
     "dev": "tauri dev",
-    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test": "npm run test:rust && npm run test:ui",
     "build": "bash build.sh",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:ui": "node --test \"ui/test/*.test.js\""
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
