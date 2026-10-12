@@ -25,9 +25,16 @@ file_icon_provider = "1"
 png = "0.18"
 base64 = "0.22"
 
+# Release: thin LTO + parallel codegen builds ~40% faster than full LTO (92s vs 152s clean in
+# our measurements) for an executable about 15% larger. Set CARGO_PROFILE_RELEASE_LTO=true and
+# CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 for the smallest possible binary.
 [profile.release]
-codegen-units = 1
-lto = true
+codegen-units = 16
+lto = "thin"
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# Dev: line tables are enough for backtraces and make linking faster.
+[profile.dev]
+debug = "line-tables-only"

@@ -1,0 +1,4 @@
+# rust-lld ships with the Rust toolchain and links noticeably faster than link.exe.
+# (Visual Studio Build Tools are still needed: they provide the Windows libraries.)
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"
