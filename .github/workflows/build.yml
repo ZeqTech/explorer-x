@@ -64,6 +64,13 @@ jobs:
           path: ~\AppData\Local\tauri
           key: tauri-tools-${{ runner.os }}-v1
 
+      # Installer names and the app version come from the files, not the tag, so copy the tag's
+      # version (v0.2.0 -> 0.2.0) into them for release builds.
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: node scripts/set-version.js "${GITHUB_REF_NAME#v}"
+
       - name: Build
         shell: bash
         run: sh ./build.sh ${{ matrix.target }}

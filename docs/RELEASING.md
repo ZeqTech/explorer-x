@@ -6,13 +6,20 @@ secrets; follow the steps below with your own keys.
 
 ## Cutting a release
 
-1. Bump the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`.
-2. Commit, push to `main` and wait for the **Build** workflow to go green (it also warms the cache).
-3. Tag and push:
+1. Commit and push everything you want in the release to `main`, and wait for the **Build**
+   workflow to go green (it also warms the cache).
+2. Tag **that exact commit** and push the tag:
 
    ```bash
-   git tag v0.2.0 && git push --tags
+   git tag v0.2.0 && git push origin v0.2.0
    ```
+
+   A tag is a fixed pointer to one commit. It does not move when you commit again, and an
+   existing tag name can't be reused, so every release needs a new version number
+   (and the tag must be created *after* your last commit).
+3. CI copies the tag's version into `package.json`, `Cargo.toml` and `tauri.conf.json`
+   (`scripts/set-version.js`), so the installers are named after the tag, e.g.
+   `Explorer X_0.2.0_x64-setup.exe`. To do the same locally: `node scripts/set-version.js 0.2.0`.
 
 4. The Build workflow builds Windows and a universal macOS app and uploads them as artifacts.
    Publishing the GitHub Release is gated on a manual **Run workflow** from the tag
