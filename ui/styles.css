@@ -40,6 +40,11 @@ body.resizing { cursor: col-resize; }
 #zoom { width: 90px; accent-color: var(--accent); }
 #nav .pin::before { content: "\1F4CC  "; }
 #nav div { display: flex; align-items: center; }
+#nav h4.sec { cursor: pointer; user-select: none; display: flex; align-items: center; }
+#nav h4.sec:hover { color: var(--fg); }
+#nav h4.sec::before { content: "\25BE"; display: inline-block; width: 12px; margin-left: -2px; font-size: 10px; }
+#nav h4.sec.collapsed::before { content: "\25B8"; }
+#nav h4 .count { margin-left: 6px; padding: 0 6px; border-radius: 8px; background: var(--hover); font-size: 10px; font-weight: 400; }
 #nav h4 { margin: 10px 12px 4px; font-size: 11px; text-transform: uppercase; color: var(--muted); font-weight: 600; }
 #nav div { padding: 4px 12px 4px 20px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #nav div:hover { background: var(--hover); }

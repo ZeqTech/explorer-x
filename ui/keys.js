@@ -63,6 +63,7 @@ export const FIXED_KEYS = [
   ['Home / End', 'Jump to the first or last item'],
   ['Letters', 'Jump to an item by typing the start of its name (file list)'],
   ['Alt + Up / Down', 'Move the highlighted pin in the sidebar'],
+  ['Left / Right in the sidebar', 'Fold or unfold a section, or step from an item up to its heading'],
   ['Shift+F10 or the Menu key', 'Open the context menu of the highlighted sidebar item'],
   ['{mod} + click, Shift + click', 'Add to the selection, or select a range'],
   ['{mod} + mouse wheel', 'Change the icon size'],

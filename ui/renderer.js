@@ -9,11 +9,11 @@ import { el, conflictDialog, promptDialog, shortcutsDialog, chooseFolderDialog, 
   const state = {
     cwd: null, history: [], hi: -1, entries: [], sel: new Set(), anchor: null,
     sortKey: 'name', sortDir: 1, view: 'details', showHidden: false, preview: false, cut: new Set(),
-    mac: false, sep: '/', searchMode: false, pins: [], pinNames: {}, recent: [], searches: [], keys: {}, filter: { ...NO_FILTER }, icon: 64, navw: 230,
+    mac: false, sep: '/', searchMode: false, pins: [], pinNames: {}, recent: [], searches: [], keys: {}, collapsed: {}, filter: { ...NO_FILTER }, icon: 64, navw: 230,
   };
 
   // Per-user preferences, persisted in localStorage (best effort).
-  const PREF_KEYS = ['pins', 'pinNames', 'recent', 'searches', 'keys', 'icon', 'navw', 'view', 'sortKey', 'sortDir', 'showHidden', 'preview'];
+  const PREF_KEYS = ['pins', 'pinNames', 'recent', 'searches', 'keys', 'collapsed', 'icon', 'navw', 'view', 'sortKey', 'sortDir', 'showHidden', 'preview'];
   const savePrefs = () => {
     try { localStorage.setItem('explorerx', JSON.stringify(Object.fromEntries(PREF_KEYS.map((k) => [k, state[k]])))); } catch { /* ignore */ }
   };
@@ -283,12 +283,24 @@ import { el, conflictDialog, promptDialog, shortcutsDialog, chooseFolderDialog, 
       const raw = ev.dataTransfer.getData('text/x-explorerx'); if (!raw) return;
       await pinFolders(JSON.parse(raw));
     });
-    const section = (title, items, pinned, extraMenu = []) => {
-      const h = document.createElement('h4'); h.textContent = title; nav.appendChild(h);
+    // A heading you can click to fold its section away; folded headings show how many items are hidden.
+    // Returns true when the section is folded (so its items are not drawn at all).
+    const heading = (title, count) => {
+      const folded = !!state.collapsed[title];
+      const h = document.createElement('h4');
+      h.className = 'sec' + (folded ? ' collapsed' : ''); h.dataset.sec = title; h.textContent = title;
+      h.title = folded ? 'Click to expand' : 'Click to collapse';
+      if (folded) { const n = document.createElement('span'); n.className = 'count'; n.textContent = count; h.appendChild(n); }
+      h.onclick = () => { setNavFocus(h); toggleSection(title); };
       h.oncontextmenu = pinsMenu;
+      nav.appendChild(h);
+      return folded;
+    };
+    const section = (title, items, pinned, extraMenu = []) => {
+      if (heading(title, items.length)) return;
       items.forEach((it, idx) => {
         const d = document.createElement('div'); d.textContent = it.name; d.title = it.path; d.dataset.path = it.path;
-        if (pinned) { d.classList.add('pin'); if (missingPins.has(it.path)) { d.classList.add('missing'); d.title = 'Folder not found: ' + it.path; } if (idx < 9) d.title = it.path + '  (' + (state.mac ? '⌘' : 'Ctrl+') + (idx + 1) + ')'; }
+        if (pinned) { d.classList.add('pin'); if (missingPins.has(it.path)) { d.classList.add('missing'); d.title = 'Folder not found: ' + it.path; } if (idx < 9) d.title = it.path + hintFor('pin' + (idx + 1)); }
         d.oncontextmenu = (ev) => {
           ev.preventDefault(); ev.stopPropagation();
           showCustomMenu(ev.clientX, ev.clientY, [
@@ -328,8 +340,9 @@ import { el, conflictDialog, promptDialog, shortcutsDialog, chooseFolderDialog, 
       ]);
     }
     if (state.searches.length) {
-      const h = document.createElement('h4'); h.textContent = 'Saved searches'; nav.appendChild(h);
+      const folded = heading('Saved searches', state.searches.length);
       state.searches.forEach((sv, i) => {
+        if (folded) return;
         const d = document.createElement('div'); d.className = 'saved'; d.textContent = sv.name;
         d.title = '“' + sv.query + '” in ' + sv.root;
         d.onclick = guard(() => openSavedSearch(sv));
@@ -351,6 +364,11 @@ import { el, conflictDialog, promptDialog, shortcutsDialog, chooseFolderDialog, 
     section('This computer', places.drives);
     renderNavActive(); restoreNavFocus();
     markMissingPins(reload);
+  }
+  // Folds or unfolds a sidebar section; the choice is remembered with the other preferences.
+  async function toggleSection(title) {
+    if (state.collapsed[title]) delete state.collapsed[title]; else state.collapsed[title] = true;
+    savePrefs(); await renderNav(false);
   }
   // Pins whose folder is gone (deleted, or a drive that is not connected) are struck through.
   // Checked after the sidebar is drawn so a slow network drive cannot hold it up.
@@ -1154,8 +1172,8 @@ import { el, conflictDialog, promptDialog, shortcutsDialog, chooseFolderDialog, 
 
   // sidebar
   let navKey = null;
-  const navItems = () => [...document.querySelectorAll('#nav > div')];
-  const navKeyOf = (d) => d.dataset.path || ('s:' + d.textContent);
+  const navItems = () => [...document.querySelectorAll('#nav > div, #nav > h4')];
+  const navKeyOf = (d) => d.dataset.path || (d.dataset.sec ? 'h:' + d.dataset.sec : 's:' + d.textContent);
   function setNavFocus(d) {
     navKey = d ? navKeyOf(d) : null;
     for (const x of navItems()) x.classList.toggle('kfocus', x === d);
@@ -1177,6 +1195,16 @@ import { el, conflictDialog, promptDialog, shortcutsDialog, chooseFolderDialog, 
       case 'ArrowUp': return move(cur < 0 ? 0 : cur - 1);
       case 'Home': return move(0);
       case 'End': return move(items.length - 1);
+      // Left / Right fold and unfold a section, or step from an item back up to its heading
+      case 'ArrowLeft': case 'ArrowRight': {
+        if (!d || ev.altKey || ev.ctrlKey || ev.metaKey) return false;
+        const isHead = d.tagName === 'H4';
+        if (ev.key === 'ArrowLeft') {
+          if (isHead && !state.collapsed[d.dataset.sec]) { ev.preventDefault(); toggleSection(d.dataset.sec); return true; }
+          if (!isHead) { ev.preventDefault(); setNavFocus(items.slice(0, cur).reverse().find((x) => x.tagName === 'H4')); return true; }
+        } else if (isHead && state.collapsed[d.dataset.sec]) { ev.preventDefault(); toggleSection(d.dataset.sec); return true; }
+        return false;
+      }
       case 'ContextMenu': case 'F10': {
         if (ev.key === 'F10' && !ev.shiftKey) return false;
         if (!d || !d.oncontextmenu) return false;

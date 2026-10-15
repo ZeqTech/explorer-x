@@ -45,6 +45,7 @@ The **Added** column holds a release version, or a date for work not released ye
 | Pin shortcuts | `Ctrl+1` to `Ctrl+9` open the first nine pins | 2026-10-15 |
 | Recent folders | The **Recent** section lists folders you visited lately | 2026-10-15 |
 | Undo for pin changes | `Ctrl+Z` / `Ctrl+Y` also undo and redo pinning, unpinning, reordering, renaming and importing pins | 2026-10-15 |
+| Collapsible sidebar sections | Click a heading (Pinned, Recent, Saved searches, Quick access, This computer) to fold it; a folded heading shows how many items it holds. Folded sections are remembered. With the keyboard, `Left` / `Right` fold and unfold the highlighted section | 2026-10-15 |
 | Resizable sidebar | Drag the divider; double-click to reset | initial |
 
 ## File operations
