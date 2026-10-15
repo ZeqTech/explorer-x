@@ -69,8 +69,15 @@ echo "==> Building version $VERSION"
 # Empty dist/ rather than deleting it: the folder itself can be busy (open in a terminal or an
 # editor), which made "rm -rf dist" fail with "Device or resource busy".
 mkdir -p dist
-if ! find dist -mindepth 1 -delete 2>/dev/null; then
-  echo "Could not clear dist/. Close anything using files in it (a running Explorer X from dist/, an open terminal) and retry." >&2
+in_use=()
+for f in dist/* dist/.[!.]*; do
+  [ -e "$f" ] || continue
+  rm -rf "$f" 2>/dev/null || in_use+=("$f")
+done
+if [ "${#in_use[@]}" -gt 0 ]; then
+  echo "Could not clear dist/ because these are in use (is Explorer X running from dist/?):" >&2
+  printf '  %s\n' "${in_use[@]}" >&2
+  echo "Close the program using them and run the build again." >&2
   exit 1
 fi
 
