@@ -59,6 +59,7 @@ The **Added** column holds a release version, or a date for work not released ye
 | Batch rename | Select several items and choose **Rename…**: find and replace, numbering, live preview | 2026-10-15 |
 | Compress and extract ZIP | Right-click: **Compress to ZIP**, **Extract to folder**. Large archives show progress and can be cancelled; a cancelled job leaves nothing behind | 2026-10-15 |
 | Find duplicate files | Right-click a folder or empty space: **Find duplicate files here** | 2026-10-15 |
+| Open with… | Right-click a file: on Windows this opens the system app picker; on macOS and Linux you type the application | 2026-10-15 |
 | Open terminal here | Right-click | initial |
 
 ## Releases

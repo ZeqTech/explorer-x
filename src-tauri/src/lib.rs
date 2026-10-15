@@ -334,6 +334,46 @@ async fn file_icon(cache: State<'_, IconCache>, path: String, is_dir: bool) -> R
 fn open_path(app: AppHandle, path: String) -> Res<()> {
     app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
 }
+/// What to run to open `path` with a chosen application. Without an application name, Windows shows
+/// its own "Open with" dialog; macOS and Linux need a name (an app such as "TextEdit", or a command).
+fn open_with_command(path: &str, app: Option<&str>) -> Res<std::process::Command> {
+    use std::process::Command;
+    let app = app.map(str::trim).filter(|a| !a.is_empty());
+    match app {
+        #[cfg(windows)]
+        None => {
+            use std::os::windows::process::CommandExt;
+            let mut c = Command::new("rundll32.exe");
+            c.args(["shell32.dll,OpenAs_RunDLL", path]).creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            Ok(c)
+        }
+        #[cfg(not(windows))]
+        None => Err("Enter the name of an application".into()),
+        #[cfg(target_os = "macos")]
+        Some(a) => {
+            let mut c = Command::new("open");
+            c.args(["-a", a, path]);
+            Ok(c)
+        }
+        #[cfg(not(target_os = "macos"))]
+        Some(a) => {
+            let mut c = Command::new(a);
+            c.arg(path);
+            Ok(c)
+        }
+    }
+}
+
+#[tauri::command]
+fn open_with(path: String, app: Option<String>) -> Res<()> {
+    if !std::path::Path::new(&path).exists() {
+        return Err("That file no longer exists".into());
+    }
+    open_with_command(&path, app.as_deref())?
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Could not start the application: {e}"))
+}
 #[tauri::command]
 fn reveal_path(app: AppHandle, path: String) -> Res<()> {
     app.opener().reveal_item_in_dir(path).map_err(|e| e.to_string())
@@ -442,7 +482,7 @@ pub fn run() {
             list_dir, copy_into, move_into, rename_path, make_dir, new_file, search, drives, quick_access,
             trash_paths, open_path, reveal_path, is_dir, home_dir, platform, new_window, clipboard_write,
             clipboard_read, clipboard_text, open_terminal, cancel_op, find_conflicts, rename_many, create_path,
-            properties, dir_stats, text_preview, restore_trashed, file_icon, import_explorer_pins, compress_paths, extract_zip, find_duplicates, disk_space
+            properties, dir_stats, text_preview, restore_trashed, file_icon, import_explorer_pins, compress_paths, extract_zip, find_duplicates, disk_space, open_with
         ])
         .build(tauri::generate_context!())
         .expect("error while building Explorer X");

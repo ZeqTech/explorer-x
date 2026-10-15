@@ -42,6 +42,8 @@
     textPreview: (path, maxBytes) => call('text_preview', { path, maxBytes: maxBytes || 8192 }),
     fileIcon: (path, isDir) => call('file_icon', { path, isDir: !!isDir }),
     open: (path) => call('open_path', { path }),
+    // app: name of an application, or null for the system "Open with" dialog (Windows only)
+    openWith: (path, app) => call('open_with', { path, app: app || null }),
     reveal: (path) => call('reveal_path', { path }),
     isDir: (path) => call('is_dir', { path }),
     home: () => call('home_dir'),

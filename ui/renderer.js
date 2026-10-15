@@ -685,6 +685,16 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     record({ label: 'Extract ' + z.name, undo: () => api.trash([out]), redo: async () => { out = await run(); } });
     await refresh(); state.sel = new Set([out]); paintSel(); toast('Extracted to ' + baseName(out));
   });
+  // "Open with...": Windows shows its own app picker; elsewhere we ask which application to use.
+  const doOpenWith = guard(async () => {
+    const e = selected()[0]; if (!e || e.isDir) return;
+    if (isWindows()) { await api.openWith(e.path, null); return; }
+    const app = await promptDialog({
+      title: 'Open with\u2026', label: 'Application to open \u201C' + e.name + '\u201D with' + (state.mac ? ' (for example TextEdit)' : ' (a program name or full path)'),
+      okText: 'Open', validate: (v) => (v.trim() ? null : 'Enter an application name'),
+    });
+    if (app) await api.openWith(e.path, app);
+  });
   // Scans `root` for files with identical contents and offers to trash the extra copies.
   const doFindDuplicates = guard(async (root) => {
     const opId = api.newOpId();
@@ -849,6 +859,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
       [pinned ? 'Unpin from sidebar' : 'Pin to sidebar', () => togglePin(selected()[0].path), oneDir],
       ['Open in new tab', () => newTab(selected()[0].path, false), oneDir],
       ['Open in new window', () => api.newWindow(selected()[0].path), oneDir],
+      ['Open with\u2026', doOpenWith, one && !selected()[0].isDir],
       [state.mac ? 'Reveal in Finder' : 'Show in Explorer', () => api.reveal(selected()[0].path), one],
       ['Open in terminal', () => doTerminal(selected()[0].path), one],
       ['Copy to other pane', () => sendToPane2('copy'), pane2.open],
