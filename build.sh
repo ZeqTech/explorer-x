@@ -55,13 +55,32 @@ else
 fi
 
 BUNDLE=src-tauri/target/release/bundle
-rm -rf dist && mkdir -p dist
+
+# The version being built. Installer names come from tauri.conf.json, so it must match package.json.
+VERSION=$(node -p "require('./package.json').version")
+CONF_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+if [ "$VERSION" != "$CONF_VERSION" ]; then
+  echo "Version mismatch: package.json says $VERSION but src-tauri/tauri.conf.json says $CONF_VERSION." >&2
+  echo "Run: node scripts/set-version.js $VERSION" >&2
+  exit 1
+fi
+echo "==> Building version $VERSION"
+
+# Empty dist/ rather than deleting it: the folder itself can be busy (open in a terminal or an
+# editor), which made "rm -rf dist" fail with "Device or resource busy".
+mkdir -p dist
+if ! find dist -mindepth 1 -delete 2>/dev/null; then
+  echo "Could not clear dist/. Close anything using files in it (a running Explorer X from dist/, an open terminal) and retry." >&2
+  exit 1
+fi
 
 build_win() {
   echo "==> Building Windows (NSIS installer + portable exe)"
+  # Installers from earlier versions are left behind in the bundle folder; remove them so only the
+  # one for this version exists.
+  rm -rf "$BUNDLE/nsis"
   "$NPM" exec tauri build --bundles nsis
-  cp "$BUNDLE"/nsis/*.exe dist/
-  VERSION=$(node -p "require('./package.json').version")
+  cp "$BUNDLE"/nsis/*"_${VERSION}_"*.exe dist/
   cp src-tauri/target/release/explorer-x.exe "dist/Explorer X ${VERSION}.exe"
 }
 
@@ -75,9 +94,10 @@ build_mac() {
   MAC_TARGET="${MAC_TARGET:-universal-apple-darwin}"
   echo "==> Building macOS ($MAC_TARGET, dmg)"
   rustup target add aarch64-apple-darwin x86_64-apple-darwin
-  "$NPM" exec tauri build --target "$MAC_TARGET" --bundles dmg
   M=src-tauri/target/$MAC_TARGET/release/bundle
-  cp "$M"/dmg/*.dmg dist/
+  rm -rf "$M/dmg" # older versions' disk images would otherwise be copied too
+  "$NPM" exec tauri build --target "$MAC_TARGET" --bundles dmg
+  cp "$M"/dmg/*"_${VERSION}_"*.dmg dist/
 }
 
 case "$TARGET" in
