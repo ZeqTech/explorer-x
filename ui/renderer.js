@@ -169,6 +169,7 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
     try {
       state.entries = await api.list(dir, state.showHidden);
     } catch (e) { toast('Cannot open ' + dir + ': ' + e.message); return; }
+    if (dir !== state.cwd || push) dirSizes.clear();
     state.cwd = dir; state.sel.clear(); state.anchor = null; state.searchMode = false; $('search').value = '';
     if (push) {
       state.history = state.history.slice(0, state.hi + 1); state.history.push(dir); state.hi = state.history.length - 1;
@@ -399,13 +400,35 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
   }
 
   // ---- rendering --------------------------------------------------------
+  // Folder sizes are only worked out (in the background) while the list is sorted by size.
+  const dirSizes = new Map();
+  let sizeToken = 0;
+  async function computeFolderSizes() {
+    const token = ++sizeToken;
+    const todo = shown.filter((e) => e.isDir && !dirSizes.has(e.path));
+    if (!todo.length || state.searchMode) return;
+    toast('Calculating folder sizes…');
+    const worker = async () => {
+      while (todo.length && token === sizeToken) {
+        const e = todo.shift();
+        const stats = await api.dirStats(e.path).catch(() => null);
+        if (token !== sizeToken) return;
+        dirSizes.set(e.path, stats ? stats.size : 0);
+        const cell = document.querySelector('[data-path="' + CSS.escape(e.path) + '"] .num');
+        if (cell) cell.textContent = fmtSize(dirSizes.get(e.path));
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    if (token === sizeToken && state.sortKey === 'size') { render(); toast('Sorted folders by size'); }
+  }
+
   function sorted() {
     const k = state.sortKey, dir = state.sortDir;
     return [...state.entries].sort((a, b) => {
       if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
       let r;
       if (k === 'name') r = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
-      else if (k === 'size') r = (a.size || 0) - (b.size || 0);
+      else if (k === 'size') r = a.isDir ? (dirSizes.get(a.path) ?? -1) - (dirSizes.get(b.path) ?? -1) : (a.size || 0) - (b.size || 0);
       else if (k === 'ext') r = a.ext.localeCompare(b.ext) || a.name.localeCompare(b.name);
       else r = a.mtime - b.mtime;
       return r * dir;
@@ -432,6 +455,7 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
     for (const e of shown) parent.appendChild(makeItem(e));
     if (!shown.length) { const m = document.createElement('div'); m.className = 'empty'; m.textContent = state.searchMode ? 'No matches.' : 'This folder is empty.'; host.appendChild(m); }
     updateStatus(); schedulePreview();
+    if (state.sortKey === 'size') computeFolderSizes(); else sizeToken++;
   }
 
   function makeItem(e) {
@@ -445,7 +469,7 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
       n.append(ic, t);
       const m = document.createElement('span'); m.textContent = e.mtime ? fmtDate(e.mtime) : '';
       const ty = document.createElement('span'); ty.textContent = typeOf(e);
-      const sz = document.createElement('span'); sz.className = 'num'; sz.textContent = fmtSize(e.size);
+      const sz = document.createElement('span'); sz.className = 'num'; sz.textContent = e.isDir ? (dirSizes.has(e.path) ? fmtSize(dirSizes.get(e.path)) : '') : fmtSize(e.size);
       el.append(n, m, ty, sz);
     } else {
       const b = document.createElement('div'); b.className = 'big';
