@@ -43,10 +43,10 @@ echo "Using $(rustc -V)"
 
 # On Windows, npm/npx are bash scripts whose "#!/usr/bin/env bash" can resolve to the WSL
 # launcher; the .cmd shims avoid that.
-if [ "$HOST" = win ]; then NPM=npm.cmd; NPX=npx.cmd; else NPM=npm; NPX=npx; fi
+if [ "$HOST" = win ]; then NPM=pnpm.cmd; else NPM=pnpm; fi
 
 echo "==> Installing dependencies"
-"$NPM" install --no-audit --no-fund
+"$NPM" install
 if [ "${SKIP_TESTS:-0}" = 1 ]; then
   echo "==> Skipping tests (SKIP_TESTS=1)"
 else
@@ -59,7 +59,7 @@ rm -rf dist && mkdir -p dist
 
 build_win() {
   echo "==> Building Windows (NSIS installer + portable exe)"
-  "$NPX" tauri build --bundles nsis
+  "$NPM" exec tauri build --bundles nsis
   cp "$BUNDLE"/nsis/*.exe dist/
   VERSION=$(node -p "require('./package.json').version")
   cp src-tauri/target/release/explorer-x.exe "dist/Explorer X ${VERSION}.exe"
@@ -75,7 +75,7 @@ build_mac() {
   MAC_TARGET="${MAC_TARGET:-universal-apple-darwin}"
   echo "==> Building macOS ($MAC_TARGET, dmg)"
   rustup target add aarch64-apple-darwin x86_64-apple-darwin
-  "$NPX" tauri build --target "$MAC_TARGET" --bundles dmg
+  "$NPM" exec tauri build --target "$MAC_TARGET" --bundles dmg
   M=src-tauri/target/$MAC_TARGET/release/bundle
   cp "$M"/dmg/*.dmg dist/
 }

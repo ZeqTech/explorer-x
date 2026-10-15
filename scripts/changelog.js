@@ -69,7 +69,7 @@ for (const line of log ? log.split('\n') : []) {
   const subject = rest.join('\t').trim();
   if (!subject || SKIP.test(subject)) continue;
   const [group, text] = classify(subject);
-  groups[group].push(`- ${text} (${repoUrl ? `[${short}](${repoUrl}/commit/${full})` : short})`);
+  groups[group].push(`- ${text} [${short}]`);// (${repoUrl ? `[${short}](${repoUrl}/commit/${full})` : short})`);
 }
 
 const version = opt('version') || 'Unreleased';
