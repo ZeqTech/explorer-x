@@ -1,4 +1,4 @@
-import { iconKey, fmtSize, fmtDate, fmtDateTime, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves, parsePins, planRename } from './format.js';
+import { iconKey, fmtSize, fmtDate, fmtDateTime, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves, parsePins, planRename, matchesFilter, NO_FILTER, filterActive } from './format.js';
 import { UndoStack } from './undo.js';
 import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, progressDialog, propertiesDialog, multiPropertiesDialog, dialogOpen } from './dialogs.js';
 
@@ -8,7 +8,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
   const state = {
     cwd: null, history: [], hi: -1, entries: [], sel: new Set(), anchor: null,
     sortKey: 'name', sortDir: 1, view: 'details', showHidden: false, preview: false, cut: new Set(),
-    mac: false, sep: '/', searchMode: false, pins: [], pinNames: {}, recent: [], searches: [], icon: 64, navw: 230,
+    mac: false, sep: '/', searchMode: false, pins: [], pinNames: {}, recent: [], searches: [], filter: { ...NO_FILTER }, icon: 64, navw: 230,
   };
 
   // Per-user preferences, persisted in localStorage (best effort).
@@ -204,6 +204,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     if (push) {
       state.history = state.history.slice(0, state.hi + 1); state.history.push(dir); state.hi = state.history.length - 1;
       if (addRecent(dir)) renderNav(false);
+      resetFilter(); // a filter belongs to the folder it was set in
     }
     document.title = dir.split(/[\\/]/).filter(Boolean).pop() || dir;
     render(); renderCrumbs(); renderNavActive(); syncTab(); updateSpace();
@@ -505,7 +506,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
 
   function sorted() {
     const k = state.sortKey, dir = state.sortDir;
-    return [...state.entries].sort((a, b) => {
+    return state.entries.filter((e) => matchesFilter(e, state.filter)).sort((a, b) => {
       if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
       let r;
       if (k === 'name') r = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
@@ -584,7 +585,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
   }
 
   function updateStatus() {
-    $('count').textContent = shown.length + ' item' + (shown.length === 1 ? '' : 's');
+    $('count').textContent = filterActive(state.filter) ? shown.length + ' of ' + state.entries.length + ' items' : shown.length + ' item' + (shown.length === 1 ? '' : 's');
     if (pendingToast) { $('selinfo').textContent = pendingToast; pendingToast = null; return; }
     const n = state.sel.size;
     if (!n) { $('selinfo').textContent = ''; return; }
@@ -895,6 +896,22 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
   $('files').ondragover = (ev) => ev.preventDefault();
   $('files').ondrop = guard(async (ev) => { ev.preventDefault(); await dropOnto(state.cwd, ev); });
 
+  // ---- filter bar: type, size, modified ------------------------------------------
+  function syncFilterUi() {
+    $('fType').value = state.filter.type; $('fSize').value = state.filter.size; $('fDate').value = state.filter.date;
+    $('filterBtn').classList.toggle('on', !$('filterbar').hidden);
+  }
+  function resetFilter() { state.filter = { ...NO_FILTER }; syncFilterUi(); }
+  function setFilter(key, value) { state.filter = { ...state.filter, [key]: value }; syncFilterUi(); render(); }
+  $('fType').onchange = (e) => setFilter('type', e.target.value);
+  $('fSize').onchange = (e) => setFilter('size', e.target.value);
+  $('fDate').onchange = (e) => setFilter('date', e.target.value);
+  $('fClear').onclick = () => { resetFilter(); render(); };
+  $('filterBtn').onclick = () => {
+    $('filterbar').hidden = !$('filterbar').hidden;
+    if ($('filterbar').hidden) { resetFilter(); render(); } else { syncFilterUi(); $('fType').focus(); }
+  };
+
   // ---- toolbar ----------------------------------------------------------
   $('back').onclick = back; $('fwd').onclick = fwd; $('up').onclick = up; $('refresh').onclick = refresh;
   $('undo').onclick = doUndo; $('redo').onclick = doRedo;
@@ -922,7 +939,8 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     toast('Searching…');
     const res = await api.search(root, q);
     state.searchMode = true; state.searchRoot = root; state.sel.clear();
-    state.entries = res.map((r) => ({ ...r, size: null, mtime: 0, ext: r.isDir ? '' : (r.name.split('.').pop() || '').toLowerCase() }));
+    // hits carry size and modified time, so the columns and the size/date filters work on results too
+    state.entries = res.map((r) => ({ ...r, ext: r.isDir || r.name.lastIndexOf('.') <= 0 ? '' : r.name.slice(r.name.lastIndexOf('.') + 1).toLowerCase() }));
     render(); toast(res.length + ' result(s)');
   }
   $('search').oninput = () => {

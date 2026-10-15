@@ -26,6 +26,7 @@
   <button id="renameBtn">Rename</button>
   <button id="delete">Delete</button>
   <span class="spacer"></span>
+  <button id="filterBtn" title="Filter by type, size or date">Filter</button>
   <select id="sort">
     <option value="name">Sort: Name</option><option value="mtime">Sort: Date modified</option>
     <option value="ext">Sort: Type</option><option value="size">Sort: Size</option>
@@ -36,6 +37,28 @@
   <button id="hidden"title="Show hidden items (Ctrl+H)">Hidden</button>
   <button id="view" title="Toggle view">View: Details</button>
 </nav>
+<div id="filterbar" hidden>
+  <label>Type
+    <select id="fType">
+      <option value="all">All</option><option value="folders">Folders</option><option value="images">Images</option>
+      <option value="video">Video</option><option value="audio">Audio</option><option value="documents">Documents</option>
+      <option value="archives">Archives</option><option value="code">Code</option><option value="programs">Programs</option>
+    </select>
+  </label>
+  <label>Size (files)
+    <select id="fSize">
+      <option value="any">Any</option><option value="empty">Empty</option><option value="small">Under 1 MB</option>
+      <option value="medium">1 MB to 100 MB</option><option value="large">100 MB to 1 GB</option><option value="huge">Over 1 GB</option>
+    </select>
+  </label>
+  <label>Modified
+    <select id="fDate">
+      <option value="any">Any time</option><option value="today">Today</option><option value="week">Last 7 days</option>
+      <option value="month">Last 30 days</option><option value="year">This year</option><option value="older">Over a year ago</option>
+    </select>
+  </label>
+  <button id="fClear">Clear</button>
+</div>
 <main>
   <aside id="nav" tabindex="0"></aside>
   <div id="resizer" title="Drag to resize (double-click to reset)"></div>

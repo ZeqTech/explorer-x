@@ -40,6 +40,8 @@ pub struct Hit {
     pub name: String,
     pub path: String,
     pub is_dir: bool,
+    pub size: Option<u64>,
+    pub mtime: f64,
 }
 
 /// One item that ended up somewhere: used to report results and to undo/redo moves and copies.
@@ -628,7 +630,14 @@ pub fn search(root: &str, query: &str, limit: usize) -> Vec<Hit> {
             let name = e.file_name().to_string_lossy().into_owned();
             let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false); // symlinks are not followed
             if name.to_lowercase().contains(&q) {
-                hits.push(Hit { name, path: e.path().to_string_lossy().into_owned(), is_dir });
+                let md = e.metadata().ok();
+                hits.push(Hit {
+                    size: if is_dir { None } else { md.as_ref().map(|m| m.len()) },
+                    mtime: md.as_ref().map(|m| millis(m.modified())).unwrap_or(0.0),
+                    name,
+                    path: e.path().to_string_lossy().into_owned(),
+                    is_dir,
+                });
             }
             if is_dir {
                 stack.push(e.path());
@@ -806,6 +815,8 @@ mod tests {
         rename(&s(&d.join("b.txt")), "B.txt").unwrap(); // case-only rename is allowed
 
         assert_eq!(search(&s(&d), "a (2)", 500).len(), 1);
+        let hit = &search(&s(&d), "a (2)", 500)[0];
+        assert!(hit.size.is_some() && hit.mtime > 0.0);
         assert_eq!(Path::new(&make_dir(&s(&d), "New folder").unwrap()).file_name().unwrap(), "New folder");
         assert_eq!(Path::new(&make_dir(&s(&d), "New folder").unwrap()).file_name().unwrap(), "New folder (2)");
         fs::remove_dir_all(d).unwrap();

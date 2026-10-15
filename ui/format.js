@@ -117,3 +117,51 @@ export function planRename(items, { find = '', replace = '', template = '{name}'
   }
   return out;
 }
+
+// ---- filtering the file list -----------------------------------------------------------------
+
+/** File extensions behind the "Type" filter. "folders" is handled separately. */
+export const TYPE_EXTS = {
+  images: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif', 'ico', 'tif', 'tiff', 'heic'],
+  video: ['mp4', 'mkv', 'mov', 'avi', 'webm', 'm4v', 'wmv', 'flv', 'ogv'],
+  audio: ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'wma', 'opus'],
+  documents: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'rtf', 'odt', 'ods', 'odp', 'csv'],
+  archives: ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'tgz'],
+  code: ['js', 'ts', 'jsx', 'tsx', 'rs', 'py', 'java', 'c', 'cpp', 'h', 'cs', 'go', 'html', 'css', 'json', 'toml', 'yml', 'yaml', 'sh', 'rb', 'php', 'swift', 'kt', 'sql'],
+  programs: ['exe', 'msi', 'bat', 'cmd', 'app', 'dmg', 'apk', 'appimage'],
+};
+
+export const NO_FILTER = Object.freeze({ type: 'all', size: 'any', date: 'any' });
+export const filterActive = (f) => f.type !== 'all' || f.size !== 'any' || f.date !== 'any';
+
+const MB = 1024 * 1024, DAY = 86400000;
+
+/**
+ * True when `e` ({ isDir, ext, size, mtime }) passes the filter { type, size, date }.
+ * Size filters apply to files only (folders have no size of their own), so they hide folders.
+ * `now` is a parameter so tests can pin the clock.
+ */
+export function matchesFilter(e, f, now = Date.now()) {
+  if (f.type === 'folders') { if (!e.isDir) return false; }
+  else if (f.type !== 'all') { if (e.isDir || !(TYPE_EXTS[f.type] || []).includes((e.ext || '').toLowerCase())) return false; }
+  if (f.size !== 'any') {
+    if (e.isDir || e.size == null) return false;
+    const s = e.size;
+    const ok = { empty: s === 0, small: s > 0 && s < MB, medium: s >= MB && s < 100 * MB, large: s >= 100 * MB && s < 1024 * MB, huge: s >= 1024 * MB }[f.size];
+    if (!ok) return false;
+  }
+  if (f.date !== 'any') {
+    if (!e.mtime) return false;
+    const today = new Date(now); today.setHours(0, 0, 0, 0);
+    const yearStart = new Date(now); yearStart.setMonth(0, 1); yearStart.setHours(0, 0, 0, 0);
+    const ok = {
+      today: e.mtime >= today.getTime(),
+      week: e.mtime >= now - 7 * DAY,
+      month: e.mtime >= now - 30 * DAY,
+      year: e.mtime >= yearStart.getTime(),
+      older: e.mtime < now - 365 * DAY,
+    }[f.date];
+    if (!ok) return false;
+  }
+  return true;
+}

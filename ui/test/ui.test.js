@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { UndoStack } from '../undo.js';
-import { fmtSize, parentOf, joinPath, baseName, iconKey, plural, invertMoves, typeOf, parsePins, planRename, splitExt } from '../format.js';
+import { fmtSize, parentOf, joinPath, baseName, iconKey, plural, invertMoves, typeOf, parsePins, planRename, splitExt, matchesFilter, NO_FILTER, filterActive } from '../format.js';
 
 test('fmtSize', () => {
   assert.equal(fmtSize(null), '');
@@ -106,4 +106,43 @@ test('planRename: find/replace, numbering and conflicts', () => {
 test('planRename rejects backslashes and trailing dots', () => {
   assert.match(planRename([{ name: 'a.txt' }], { template: 'x' + String.fromCharCode(92) + 'y' })[0].error, /not allowed/);
   assert.match(planRename([{ name: 'a' }], { template: 'x.' })[0].error, /dot or space/);
+});
+
+test('matchesFilter: type, size and date', () => {
+  const now = new Date(2026, 9, 15, 15, 0, 0).getTime(); // 15 Oct 2026, 15:00
+  const day = 86400000, MB = 1024 * 1024;
+  const f = (o) => ({ ...NO_FILTER, ...o });
+  const file = (ext, size, mtime = now) => ({ isDir: false, ext, size, mtime });
+  const dir = { isDir: true, ext: '', size: null, mtime: now };
+
+  assert.equal(filterActive(NO_FILTER), false);
+  assert.equal(filterActive(f({ size: 'small' })), true);
+  assert.equal(matchesFilter(file('png', 5), NO_FILTER, now), true);
+
+  assert.equal(matchesFilter(file('PNG', 5), f({ type: 'images' }), now), true);
+  assert.equal(matchesFilter(file('mp3', 5), f({ type: 'images' }), now), false);
+  assert.equal(matchesFilter(dir, f({ type: 'images' }), now), false);
+  assert.equal(matchesFilter(dir, f({ type: 'folders' }), now), true);
+  assert.equal(matchesFilter(file('txt', 5), f({ type: 'folders' }), now), false);
+
+  assert.equal(matchesFilter(file('a', 0), f({ size: 'empty' }), now), true);
+  assert.equal(matchesFilter(file('a', 1), f({ size: 'small' }), now), true);
+  assert.equal(matchesFilter(file('a', MB), f({ size: 'small' }), now), false);
+  assert.equal(matchesFilter(file('a', MB), f({ size: 'medium' }), now), true);
+  assert.equal(matchesFilter(file('a', 100 * MB), f({ size: 'large' }), now), true);
+  assert.equal(matchesFilter(file('a', 2048 * MB), f({ size: 'huge' }), now), true);
+  assert.equal(matchesFilter(dir, f({ size: 'small' }), now), false);
+
+  assert.equal(matchesFilter(file('a', 1, now - 2 * 3600000), f({ date: 'today' }), now), true);
+  assert.equal(matchesFilter(file('a', 1, now - 20 * 3600000), f({ date: 'today' }), now), false);
+  assert.equal(matchesFilter(file('a', 1, now - 6 * day), f({ date: 'week' }), now), true);
+  assert.equal(matchesFilter(file('a', 1, now - 8 * day), f({ date: 'week' }), now), false);
+  assert.equal(matchesFilter(file('a', 1, now - 29 * day), f({ date: 'month' }), now), true);
+  assert.equal(matchesFilter(file('a', 1, now - 400 * day), f({ date: 'older' }), now), true);
+  assert.equal(matchesFilter(file('a', 1, now - 10 * day), f({ date: 'older' }), now), false);
+  assert.equal(matchesFilter(file('a', 1, 0), f({ date: 'week' }), now), false);
+
+  // all three at once
+  assert.equal(matchesFilter(file('jpg', 3 * MB, now - day), f({ type: 'images', size: 'medium', date: 'week' }), now), true);
+  assert.equal(matchesFilter(file('jpg', 3 * MB, now - 40 * day), f({ type: 'images', size: 'medium', date: 'week' }), now), false);
 });

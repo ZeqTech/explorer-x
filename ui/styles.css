@@ -25,6 +25,10 @@ button.on { background: var(--sel); }
 #search { width: 220px; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); }
 #commandbar { display: flex; gap: 2px; padding: 4px 8px; border-bottom: 1px solid var(--line); align-items: center; }
 .spacer { flex: 1; }
+#filterbar { display: flex; gap: 14px; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--line); background: var(--bar); }
+#filterbar[hidden] { display: none; }
+#filterbar label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
+#filterbar select { border-color: var(--line); background: var(--bg); color: var(--fg); }
 main { flex: 1; display: flex; min-height: 0; }
 :root { --navw: 230px; --icon: 64px; }
 /* Details view icons follow the same size slider: 32px -> 14px ... 128px -> 41px */
