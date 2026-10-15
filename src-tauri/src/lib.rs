@@ -199,6 +199,35 @@ fn quick_access(app: AppHandle) -> Res<Vec<Place>> {
     Ok(fs_service::quick_access(&app.path().home_dir().map_err(|e| e.to_string())?))
 }
 
+/// Folders pinned to Quick access in Windows File Explorer, read through the shell.
+#[cfg(windows)]
+fn explorer_pins() -> Res<Vec<String>> {
+    use std::os::windows::process::CommandExt;
+    const SCRIPT: &str = "$ns=(New-Object -ComObject Shell.Application).Namespace('shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}');         foreach($i in $ns.Items()){ if($i.IsFolder -and (@($i.Verbs()|ForEach-Object{$_.Name}) -match 'Unpin from Quick access')){ $i.Path } }";
+    let out = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && std::path::Path::new(l).is_dir())
+        .map(String::from)
+        .collect())
+}
+#[cfg(not(windows))]
+fn explorer_pins() -> Res<Vec<String>> {
+    Err("Importing pins is only available on Windows".into())
+}
+#[tauri::command]
+async fn import_explorer_pins() -> Res<Vec<String>> {
+    blocking(explorer_pins).await
+}
+
 // ---- trash --------------------------------------------------------------------
 
 #[tauri::command]
@@ -390,7 +419,7 @@ pub fn run() {
             list_dir, copy_into, move_into, rename_path, make_dir, new_file, search, drives, quick_access,
             trash_paths, open_path, reveal_path, is_dir, home_dir, platform, new_window, clipboard_write,
             clipboard_read, clipboard_text, open_terminal, cancel_op, find_conflicts, rename_many, create_path,
-            properties, dir_stats, text_preview, restore_trashed, file_icon
+            properties, dir_stats, text_preview, restore_trashed, file_icon, import_explorer_pins
         ])
         .build(tauri::generate_context!())
         .expect("error while building Explorer X");

@@ -202,13 +202,20 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
 
   async function renderNav() {
     const nav = $('nav'); nav.textContent = '';
+    const importMenu = (ev) => {
+      if (!isWindows()) return;
+      ev.preventDefault(); ev.stopPropagation();
+      showCustomMenu(ev.clientX, ev.clientY, [['Import pins from File Explorer', guard(importPins)]]);
+    };
+    nav.oncontextmenu = importMenu;
     const section = (title, items, pinned) => {
       const h = document.createElement('h4'); h.textContent = title; nav.appendChild(h);
+      h.oncontextmenu = importMenu;
       for (const it of items) {
         const d = document.createElement('div'); d.textContent = it.name; d.title = it.path; d.dataset.path = it.path;
         if (pinned) d.classList.add('pin');
         d.oncontextmenu = (ev) => {
-          ev.preventDefault();
+          ev.preventDefault(); ev.stopPropagation();
           showCustomMenu(ev.clientX, ev.clientY, [
             ['Open', () => go(it.path)],
             ['Open in new tab', () => newTab(it.path)],
@@ -217,11 +224,17 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
             ['Copy path', () => doCopyPath([it.path])],
             null,
             [state.pins.includes(it.path) ? 'Unpin from sidebar' : 'Pin to sidebar', () => togglePin(it.path)],
+            ...(pinned ? [
+              ['Move up', () => movePin(it.path, -1), state.pins.indexOf(it.path) > 0],
+              ['Move down', () => movePin(it.path, 1), state.pins.indexOf(it.path) < state.pins.length - 1],
+            ] : []),
+            ...(isWindows() ? [['Import pins from File Explorer', guard(importPins)]] : []),
           ]);
         };
         d.onclick = () => go(it.path);
         d.ondragover = (ev) => ev.preventDefault();
         d.ondrop = guard(async (ev) => { ev.preventDefault(); await dropOnto(it.path, ev); });
+        if (pinned) wirePinReorder(d, it.path);
         nav.appendChild(d);
       }
     };
@@ -232,6 +245,51 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
   }
   function renderNavActive() {
     document.querySelectorAll('#nav div').forEach((d) => d.classList.toggle('active', d.dataset.path === state.cwd));
+  }
+  // Reorder pins by dragging them within the Pinned section (or via Move up / Move down).
+  let dragPin = null;
+  function wirePinReorder(d, path) {
+    d.draggable = true;
+    d.ondragstart = (ev) => { dragPin = path; ev.dataTransfer.setData('text/x-explorerx-pin', path); ev.dataTransfer.effectAllowed = 'move'; };
+    d.ondragend = () => { dragPin = null; clearPinMarks(); };
+    d.ondragover = (ev) => {
+      ev.preventDefault();
+      if (!dragPin || dragPin === path) return;
+      const after = ev.offsetY > d.clientHeight / 2;
+      clearPinMarks(); d.classList.add(after ? 'drop-after' : 'drop-before');
+    };
+    d.ondragleave = () => d.classList.remove('drop-before', 'drop-after');
+    d.ondrop = guard(async (ev) => {
+      ev.preventDefault();
+      if (dragPin) {
+        const from = dragPin, after = ev.offsetY > d.clientHeight / 2;
+        dragPin = null; clearPinMarks();
+        await reorderPin(from, path, after);
+      } else await dropOnto(path, ev);
+    });
+  }
+  const clearPinMarks = () => document.querySelectorAll('#nav .drop-before, #nav .drop-after').forEach((x) => x.classList.remove('drop-before', 'drop-after'));
+  async function reorderPin(from, target, after) {
+    if (from === target) return;
+    state.pins.splice(state.pins.indexOf(from), 1);
+    state.pins.splice(state.pins.indexOf(target) + (after ? 1 : 0), 0, from);
+    savePrefs(); await renderNav();
+  }
+  async function movePin(p, delta) {
+    const i = state.pins.indexOf(p), j = i + delta;
+    if (i < 0 || j < 0 || j >= state.pins.length) return;
+    [state.pins[i], state.pins[j]] = [state.pins[j], state.pins[i]];
+    savePrefs(); await renderNav();
+  }
+  const isWindows = () => !state.mac && state.sep === '\\';
+  async function importPins() {
+    toast('Reading File Explorer pins…');
+    const found = await api.importExplorerPins();
+    const fresh = found.filter((p) => !state.pins.includes(p));
+    state.pins.push(...fresh);
+    savePrefs(); await renderNav();
+    toast(fresh.length ? 'Imported ' + fresh.length + ' pin(s) from File Explorer'
+      : found.length ? 'All File Explorer pins are already pinned' : 'No pinned folders found in File Explorer');
   }
   async function togglePin(p) {
     const i = state.pins.indexOf(p);
@@ -488,7 +546,8 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
       ['Rename', startRename, one], [state.mac ? 'Move to Trash' : 'Delete', doDelete], null,
       ['Properties', doProperties],
     ] : [
-      [state.pins.includes(state.cwd) ? 'Unpin this folder' : 'Pin this folder', () => togglePin(state.cwd)], null,
+      [state.pins.includes(state.cwd) ? 'Unpin this folder' : 'Pin this folder', () => togglePin(state.cwd)],
+      ['Import pins from File Explorer', guard(importPins), isWindows()], null,
       ['New folder', doNewFolder], ['New text file', doNewFile], null,
       ['Open in terminal here', () => doTerminal(state.cwd)], ['Copy folder path', () => doCopyPath([state.cwd])], null,
       ['Paste', doPaste], ['Refresh', refresh], null,

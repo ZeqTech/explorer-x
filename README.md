@@ -20,7 +20,7 @@ Explorer X follows the workflow of Windows File Explorer: a breadcrumb address b
 
 ## Features
 
-Navigation uses back, forward and up buttons, a clickable breadcrumb bar, and typed paths (`~` works). Each tab keeps its own folder and history, and middle-clicking a folder opens it in a new tab. You can pin any folder to the sidebar from the right-click menu and drag the sidebar divider to resize it. Double-click the divider to reset it.
+Navigation uses back, forward and up buttons, a clickable breadcrumb bar, and typed paths (`~` works). Each tab keeps its own folder and history, and middle-clicking a folder opens it in a new tab. You can pin any folder to the sidebar from the right-click menu, and on Windows right-click the sidebar to import the folders you pinned to Quick access in File Explorer. Drag the sidebar divider to resize it. Double-click the divider to reset it.
 
 Files show in a details or icon view with sortable columns and an adjustable icon size. The icons are the ones your OS uses, and image files get thumbnails in icon view. The preview pane (`Alt+P`) shows text, images, audio, video or a folder summary without opening anything. The Properties dialog (`Alt+Enter`) shows size, folder totals, dates, attributes and location.
 
