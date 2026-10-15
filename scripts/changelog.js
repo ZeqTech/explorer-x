@@ -1,5 +1,6 @@
 // Lists the git commits between two releases as a Markdown changelog section.
-//   node scripts/changelog.js                      commits since the latest v* tag, printed
+//   node scripts/changelog.js                      commits since the latest v* tag, printed (and saved to
+//                                                  CHANGELOG.md if that file does not exist yet)
 //   node scripts/changelog.js --version 0.2.0      title the section "0.2.0" instead of "Unreleased"
 //   node scripts/changelog.js --from v0.1.1 --to v0.1.2
 //   node scripts/changelog.js --write              also put the section at the top of CHANGELOG.md
@@ -37,9 +38,11 @@ if (from) section += `\nChanges since ${from}.\n`;
 
 console.log(section);
 
-if (args.includes('--write')) {
-  const file = path.join(root, 'CHANGELOG.md');
-  let body = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '# Changelog\n\n';
+const file = path.join(root, 'CHANGELOG.md');
+const existed = fs.existsSync(file);
+// --write always saves; otherwise the file is created when it does not exist yet (never overwritten).
+if (args.includes('--write') || (!existed && !opt('from') && !opt('to'))) {
+  let body = existed ? fs.readFileSync(file, 'utf8') : '# Changelog\n\n';
   // Re-running for the same version (or Unreleased) replaces that section instead of duplicating it.
   const start = body.indexOf(`## ${version} (`);
   if (start >= 0) {
@@ -51,5 +54,5 @@ if (args.includes('--write')) {
     body = '# Changelog\n\n' + section + '\n' + body;
   }
   fs.writeFileSync(file, body);
-  console.error('wrote CHANGELOG.md');
+  console.error((existed ? 'updated' : 'created') + ' CHANGELOG.md');
 }

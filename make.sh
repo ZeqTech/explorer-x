@@ -6,7 +6,8 @@
 #   ./make.sh all                 win, plus mac when running on a Mac
 #   ./make.sh [target] --bump L   bump the version first (L = patch | minor | major | X.Y.Z), then build
 #   ./make.sh bump L              bump the version and write its changelog to CHANGELOG.md, no build
-#   ./make.sh changelog [opts]    print the commits since the last release tag
+#   ./make.sh changelog [opts]    print the commits since the last release tag; creates CHANGELOG.md
+#                                 if it is missing
 #                                 (opts: --version X.Y.Z, --from TAG, --to REF, --write)
 cd "$(dirname "${BASH_SOURCE[0]:-$0}")" || exit 1
 
