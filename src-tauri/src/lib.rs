@@ -228,6 +228,15 @@ async fn import_explorer_pins() -> Res<Vec<String>> {
     blocking(explorer_pins).await
 }
 
+#[tauri::command]
+async fn compress_paths(paths: Vec<String>) -> Res<String> {
+    blocking(move || fs_service::compress(&paths)).await
+}
+#[tauri::command]
+async fn extract_zip(path: String) -> Res<String> {
+    blocking(move || fs_service::extract(&path)).await
+}
+
 // ---- trash --------------------------------------------------------------------
 
 #[tauri::command]
@@ -419,7 +428,7 @@ pub fn run() {
             list_dir, copy_into, move_into, rename_path, make_dir, new_file, search, drives, quick_access,
             trash_paths, open_path, reveal_path, is_dir, home_dir, platform, new_window, clipboard_write,
             clipboard_read, clipboard_text, open_terminal, cancel_op, find_conflicts, rename_many, create_path,
-            properties, dir_stats, text_preview, restore_trashed, file_icon, import_explorer_pins
+            properties, dir_stats, text_preview, restore_trashed, file_icon, import_explorer_pins, compress_paths, extract_zip
         ])
         .build(tauri::generate_context!())
         .expect("error while building Explorer X");

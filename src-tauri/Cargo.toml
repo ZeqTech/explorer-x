@@ -24,6 +24,7 @@ arboard = "3"
 file_icon_provider = "1"
 png = "0.18"
 base64 = "0.22"
+zip = { version = "9.0.3", default-features = false, features = ["deflate"] }
 
 # Release: thin LTO + parallel codegen builds ~40% faster than full LTO (92s vs 152s clean in
 # our measurements) for an executable about 15% larger. Set CARGO_PROFILE_RELEASE_LTO=true and

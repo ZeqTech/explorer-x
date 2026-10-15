@@ -30,6 +30,8 @@
     search: (root, query) => call('search', { root, query }),
     drives: () => call('drives'),
     quickAccess: () => call('quick_access'),
+    compress: (paths) => call('compress_paths', { paths }),
+    extractZip: (path) => call('extract_zip', { path }),
     importExplorerPins: () => call('import_explorer_pins'),
     trash: (paths) => call('trash_paths', { paths }),
     restoreTrashed: (paths) => call('restore_trashed', { paths }),

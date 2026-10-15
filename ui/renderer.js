@@ -570,6 +570,21 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, progressDialog, pr
     record({ label: 'Delete ' + plural(paths.length, 'item'), undo: () => api.restoreTrashed(paths), redo: () => api.trash(paths) });
     await refresh();
   });
+  // Zip files are created / extracted next to the originals; undo sends the result to the Trash.
+  const doCompress = guard(async () => {
+    const paths = selected().map((e) => e.path); if (!paths.length) return;
+    toast('Compressing…');
+    let out = await api.compress(paths);
+    record({ label: 'Compress ' + plural(paths.length, 'item'), undo: () => api.trash([out]), redo: async () => { out = await api.compress(paths); } });
+    await refresh(); state.sel = new Set([out]); paintSel(); toast('Created ' + baseName(out));
+  });
+  const doExtract = guard(async () => {
+    const z = selected()[0]; if (!z) return;
+    toast('Extracting…');
+    let out = await api.extractZip(z.path);
+    record({ label: 'Extract ' + z.name, undo: () => api.trash([out]), redo: async () => { out = await api.extractZip(z.path); } });
+    await refresh(); state.sel = new Set([out]); paintSel(); toast('Extracted to ' + baseName(out));
+  });
   const doTerminal = guard(async (p) => { await api.openTerminal(p); });
   const doCopyPath = guard(async (paths) => {
     paths = paths || (state.sel.size ? selected().map((e) => e.path) : [state.cwd]);
@@ -719,6 +734,8 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, progressDialog, pr
       ['Open in terminal', () => doTerminal(selected()[0].path), one],
       null, ['Cut', () => doCopy(true)], ['Copy', () => doCopy(false)],
       ['Copy path', () => doCopyPath()], ['Copy name', doCopyName], ['Duplicate', doDuplicate], null,
+      ['Compress to ZIP', doCompress],
+      ['Extract to folder', doExtract, one && !selected()[0].isDir && selected()[0].ext === 'zip'], null,
       [one ? 'Rename' : 'Rename…', startRename, state.sel.size > 0], [state.mac ? 'Move to Trash' : 'Delete', doDelete], null,
       ['Properties', doProperties],
     ] : [

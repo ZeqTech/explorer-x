@@ -380,6 +380,75 @@ pub fn rename_many(pairs: &[Moved]) -> Res<()> {
     Ok(())
 }
 
+// ---- zip --------------------------------------------------------------------
+
+/// Adds `path` (a file, or a folder with everything in it) to the archive under `name`.
+/// Symlinks are skipped so an archive never pulls in files from outside the selection.
+fn zip_add<W: Write + std::io::Seek>(z: &mut zip::ZipWriter<W>, path: &Path, name: &str) -> Res<()> {
+    use zip::write::SimpleFileOptions;
+    let md = fs::symlink_metadata(path).map_err(err)?;
+    if md.file_type().is_symlink() {
+        return Ok(());
+    }
+    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).large_file(md.len() > u32::MAX as u64);
+    if md.is_dir() {
+        z.add_directory(format!("{name}/"), opts).map_err(err)?;
+        let mut kids: Vec<_> = fs::read_dir(path).map_err(err)?.flatten().collect();
+        kids.sort_by_key(|k| k.file_name());
+        for k in kids {
+            zip_add(z, &k.path(), &format!("{name}/{}", k.file_name().to_string_lossy()))?;
+        }
+    } else {
+        z.start_file(name, opts).map_err(err)?;
+        let mut f = fs::File::open(path).map_err(err)?;
+        std::io::copy(&mut f, z).map_err(err)?;
+    }
+    Ok(())
+}
+
+/// Zips `paths` into a new archive next to the first one and returns its path. One item gives
+/// "<name>.zip", several give "Archive.zip"; an existing archive is never overwritten.
+pub fn compress(paths: &[String]) -> Res<String> {
+    let first = Path::new(paths.first().ok_or("Nothing to compress")?);
+    let parent = first.parent().ok_or("Invalid path")?;
+    let base = if paths.len() == 1 {
+        let n = file_name_of(first)?;
+        if first.is_dir() { n } else { Path::new(&n).file_stem().map(|x| x.to_string_lossy().into_owned()).unwrap_or(n) }
+    } else {
+        "Archive".to_string()
+    };
+    let target = parent.join(unique_name(&format!("{base}.zip"), &names_in(parent)?));
+    let result = (|| -> Res<()> {
+        let mut z = zip::ZipWriter::new(fs::File::create(&target).map_err(err)?);
+        for p in paths {
+            let p = Path::new(p);
+            zip_add(&mut z, p, &file_name_of(p)?)?;
+        }
+        z.finish().map_err(err)?;
+        Ok(())
+    })();
+    if let Err(e) = result {
+        let _ = fs::remove_file(&target);
+        return Err(e);
+    }
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// Extracts a .zip into a new folder named after it (next to the archive) and returns that folder.
+pub fn extract(zip_path: &str) -> Res<String> {
+    let zp = Path::new(zip_path);
+    let parent = zp.parent().ok_or("Invalid path")?;
+    let stem = zp.file_stem().map(|x| x.to_string_lossy().into_owned()).ok_or("Invalid path")?;
+    let mut archive = zip::ZipArchive::new(fs::File::open(zp).map_err(err)?).map_err(|e| format!("Not a valid zip file: {e}"))?;
+    let dest = parent.join(unique_name(&stem, &names_in(parent)?));
+    fs::create_dir(&dest).map_err(err)?;
+    if let Err(e) = archive.extract(&dest) {
+        let _ = fs::remove_dir_all(&dest);
+        return Err(err(e));
+    }
+    Ok(dest.to_string_lossy().into_owned())
+}
+
 // ---- rename / create ------------------------------------------------------
 
 pub fn rename(path: &str, new_name: &str) -> Res<String> {
@@ -722,6 +791,28 @@ mod tests {
         assert_eq!(text_preview(&s(&d.join("dir").join("one.txt")), 3).unwrap().as_deref(), Some("hel"));
         fs::write(d.join("bin.dat"), [0u8, 1, 2, 255, 0]).unwrap();
         assert_eq!(text_preview(&s(&d.join("bin.dat")), 1024).unwrap(), None);
+        fs::remove_dir_all(d).unwrap();
+    }
+    #[test]
+    fn zip_round_trip() {
+        let d = tmp();
+        fs::create_dir_all(d.join("proj").join("inner")).unwrap();
+        fs::write(d.join("proj").join("a.txt"), "alpha").unwrap();
+        fs::write(d.join("proj").join("inner").join("b.txt"), "beta").unwrap();
+        fs::write(d.join("solo.txt"), "solo").unwrap();
+
+        let z1 = compress(&[s(&d.join("proj"))]).unwrap();
+        assert_eq!(Path::new(&z1).file_name().unwrap(), "proj.zip");
+        assert_eq!(Path::new(&compress(&[s(&d.join("proj"))]).unwrap()).file_name().unwrap(), "proj (2).zip");
+        let z2 = compress(&[s(&d.join("solo.txt")), s(&d.join("proj"))]).unwrap();
+        assert_eq!(Path::new(&z2).file_name().unwrap(), "Archive.zip");
+
+        let out = extract(&z1).unwrap();
+        assert_eq!(Path::new(&out).file_name().unwrap(), "proj (2)");
+        assert_eq!(read(&Path::new(&out).join("proj").join("inner").join("b.txt")), "beta");
+        let out2 = extract(&z2).unwrap();
+        assert_eq!(read(&Path::new(&out2).join("solo.txt")), "solo");
+        assert!(extract(&s(&d.join("solo.txt"))).is_err());
         fs::remove_dir_all(d).unwrap();
     }
 }
