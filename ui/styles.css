@@ -91,6 +91,7 @@ body.resizing { cursor: col-resize; }
 .dlg .field:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .dlg textarea.field { font: 12px/1.4 ui-monospace, Consolas, Menlo, monospace; resize: vertical; }
 .dlg .error { color: #d13438; min-height: 1em; font-size: 12px; margin: 4px 0 0; }
+#nav .saved::before { content: "\1F50D  "; }
 #nav div.missing { color: var(--muted); text-decoration: line-through; }
 #nav.dropzone { outline: 2px dashed var(--accent); outline-offset: -2px; }
 .dlg.props { width: min(520px, calc(100vw - 32px)); }

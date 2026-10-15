@@ -8,11 +8,11 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
   const state = {
     cwd: null, history: [], hi: -1, entries: [], sel: new Set(), anchor: null,
     sortKey: 'name', sortDir: 1, view: 'details', showHidden: false, preview: false, cut: new Set(),
-    mac: false, sep: '/', searchMode: false, pins: [], pinNames: {}, recent: [], icon: 64, navw: 230,
+    mac: false, sep: '/', searchMode: false, pins: [], pinNames: {}, recent: [], searches: [], icon: 64, navw: 230,
   };
 
   // Per-user preferences, persisted in localStorage (best effort).
-  const PREF_KEYS = ['pins', 'pinNames', 'recent', 'icon', 'navw', 'view', 'sortKey', 'sortDir', 'showHidden', 'preview'];
+  const PREF_KEYS = ['pins', 'pinNames', 'recent', 'searches', 'icon', 'navw', 'view', 'sortKey', 'sortDir', 'showHidden', 'preview'];
   const savePrefs = () => {
     try { localStorage.setItem('explorerx', JSON.stringify(Object.fromEntries(PREF_KEYS.map((k) => [k, state[k]])))); } catch { /* ignore */ }
   };
@@ -278,6 +278,26 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
         ['Clear recent folders', () => forgetRecent(null)],
       ]);
     }
+    if (state.searches.length) {
+      const h = document.createElement('h4'); h.textContent = 'Saved searches'; nav.appendChild(h);
+      state.searches.forEach((sv, i) => {
+        const d = document.createElement('div'); d.className = 'saved'; d.textContent = sv.name;
+        d.title = '“' + sv.query + '” in ' + sv.root;
+        d.onclick = guard(() => openSavedSearch(sv));
+        d.oncontextmenu = (ev) => {
+          ev.preventDefault(); ev.stopPropagation();
+          showCustomMenu(ev.clientX, ev.clientY, [
+            ['Run search', guard(() => openSavedSearch(sv))],
+            ['Rename…', guard(async () => {
+              const name = await promptDialog({ title: 'Rename saved search', value: sv.name, okText: 'Rename' });
+              if (name && name.trim()) { sv.name = name.trim(); savePrefs(); await renderNav(false); }
+            })],
+            ['Delete saved search', async () => { state.searches.splice(i, 1); savePrefs(); await renderNav(false); }],
+          ]);
+        };
+        nav.appendChild(d);
+      });
+    }
     section('Quick access', places.quick);
     section('This computer', places.drives);
     renderNavActive();
@@ -454,6 +474,7 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
     const parent = state.view === 'details' ? host : $('grid');
     for (const e of shown) parent.appendChild(makeItem(e));
     if (!shown.length) { const m = document.createElement('div'); m.className = 'empty'; m.textContent = state.searchMode ? 'No matches.' : 'This folder is empty.'; host.appendChild(m); }
+    $('saveSearch').hidden = !state.searchMode;
     updateStatus(); schedulePreview();
     if (state.sortKey === 'size') computeFolderSizes(); else sizeToken++;
   }
@@ -716,18 +737,33 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
   addr.onblur = () => { addr.hidden = true; };
 
   let searchTimer = 0;
+  async function runSearch(root, q) {
+    toast('Searching…');
+    const res = await api.search(root, q);
+    state.searchMode = true; state.searchRoot = root; state.sel.clear();
+    state.entries = res.map((r) => ({ ...r, size: null, mtime: 0, ext: r.isDir ? '' : (r.name.split('.').pop() || '').toLowerCase() }));
+    render(); toast(res.length + ' result(s)');
+  }
   $('search').oninput = () => {
     clearTimeout(searchTimer);
     const q = $('search').value.trim();
     if (!q) { refresh(); return; }
-    searchTimer = setTimeout(guard(async () => {
-      toast('Searching…');
-      const res = await api.search(state.cwd, q);
-      state.searchMode = true; state.sel.clear();
-      state.entries = res.map((r) => ({ ...r, size: null, mtime: 0, ext: r.isDir ? '' : (r.name.split('.').pop() || '').toLowerCase() }));
-      render(); toast(res.length + ' result(s)');
-    }), 250);
+    searchTimer = setTimeout(guard(() => runSearch(state.cwd, q)), 250);
   };
+  async function openSavedSearch(sv) {
+    await go(sv.root);
+    if (state.cwd !== sv.root) return; // folder is gone: go() already said so
+    $('search').value = sv.query;
+    await runSearch(sv.root, sv.query);
+  }
+  $('saveSearch').onclick = guard(async () => {
+    const query = $('search').value.trim(), root = state.searchRoot || state.cwd;
+    if (!query) return;
+    const name = await promptDialog({ title: 'Save search', label: '“' + query + '” in ' + root, value: query + ' in ' + baseName(root), okText: 'Save' });
+    if (!name || !name.trim()) return;
+    state.searches.push({ name: name.trim(), root, query });
+    savePrefs(); await renderNav(false); toast('Saved search');
+  });
 
   // ---- layout: sidebar resize, icon size ---------------------------------
   $('resizer').onmousedown = (ev) => {
