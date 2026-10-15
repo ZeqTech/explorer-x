@@ -88,7 +88,7 @@ build_win() {
   rm -rf "$BUNDLE/nsis"
   "$NPM" exec tauri build --bundles nsis
   cp "$BUNDLE"/nsis/*"_${VERSION}_"*.exe dist/
-  cp src-tauri/target/release/explorer-x.exe "dist/Explorer X ${VERSION}.exe"
+  cp src-tauri/target/release/explorer-x.exe "dist/Explorer X.exe"
 }
 
 build_mac() {

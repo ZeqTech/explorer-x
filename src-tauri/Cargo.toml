@@ -1,6 +1,6 @@
 [package]
 name = "explorer-x"
-version = "0.2.0"
+version = "0.4.0"
 description = "Cross-platform file explorer modeled on Windows Explorer"
 edition = "2021"
 license = "MIT"
