@@ -115,6 +115,24 @@ body.resizing { cursor: col-resize; }
 .rrow .arrow { color: var(--muted); text-align: center; }
 .dlg button:disabled { opacity: .5; }
 .duplist { max-height: 360px; overflow: auto; margin-top: 10px; border: 1px solid var(--line); border-radius: 4px; }
+/* ---- keyboard shortcuts dialog ---- */
+.keylist { max-height: 340px; overflow: auto; margin-top: 8px; border: 1px solid var(--line); border-radius: 4px; }
+.keyrow { display: grid; grid-template-columns: minmax(150px, 1fr) 1.6fr; align-items: center; gap: 10px; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.keyrow:last-child { border-bottom: 0; }
+.keyrow.changed .keylabel { font-weight: 600; }
+.keychips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip { display: inline-flex; align-items: center; background: var(--bar); border: 1px solid var(--line); border-radius: 4px; }
+kbd { font: 12px ui-monospace, Consolas, Menlo, monospace; padding: 1px 6px; background: var(--bar); border: 1px solid var(--line); border-radius: 4px; }
+.chip kbd { border: 0; background: transparent; }
+.dlg .chipx { border: 0; padding: 0 6px; line-height: 20px; color: var(--muted); background: transparent; }
+.dlg .chipx:hover { color: var(--fg); }
+.dlg .addkey { padding: 1px 8px; border: 1px dashed var(--line); font-size: 12px; color: var(--muted); }
+.dlg .addkey:hover { color: var(--fg); }
+.dlg .addkey.on { border-color: var(--accent); color: var(--accent); }
+.keystatus { min-height: 1.5em; margin: 6px 0 0; }
+.keyfixed { margin-top: 6px; color: var(--muted); }
+.keyfixed summary { cursor: pointer; }
+.keyfixed .keyrow { grid-template-columns: minmax(150px, 1fr) 1.6fr; border-bottom: 0; padding: 2px 8px; }
 .duplist.short { max-height: 220px; margin-top: 4px; }
 .duprow b { flex: none; font-weight: 600; }
 .duprow .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { UndoStack } from '../undo.js';
+import { ACTIONS, comboOf, comboLabel, checkCombo, buildKeymap, assignCombo, removeCombo, resetAction, effective, isModified, defaultsOf, actionById } from '../keys.js';
 import { fmtSize, parentOf, joinPath, baseName, iconKey, plural, invertMoves, typeOf, parsePins, planRename, splitExt, matchesFilter, NO_FILTER, filterActive } from '../format.js';
 
 test('fmtSize', () => {
@@ -145,4 +146,93 @@ test('matchesFilter: type, size and date', () => {
   // all three at once
   assert.equal(matchesFilter(file('jpg', 3 * MB, now - day), f({ type: 'images', size: 'medium', date: 'week' }), now), true);
   assert.equal(matchesFilter(file('jpg', 3 * MB, now - 40 * day), f({ type: 'images', size: 'medium', date: 'week' }), now), false);
+});
+
+// ---- keyboard shortcuts ----------------------------------------------------------------------
+const ev = (o) => ({ key: '', code: '', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...o });
+
+test('keys: default shortcuts have unique ids and no clashes', () => {
+  assert.equal(new Set(ACTIONS.map((a) => a.id)).size, ACTIONS.length);
+  for (const mac of [false, true]) {
+    const seen = new Map();
+    for (const a of ACTIONS) for (const c of defaultsOf(a, mac)) {
+      assert.equal(seen.has(c), false, `${c} is bound to both ${seen.get(c)} and ${a.id} (mac=${mac})`);
+      seen.set(c, a.id);
+      assert.equal(checkCombo(c), null, `${c} should be a valid default`);
+    }
+  }
+});
+
+test('keys: comboOf reads key events the same on every platform', () => {
+  assert.equal(comboOf(ev({ key: 'n', ctrlKey: true, shiftKey: true }), false), 'Mod+Shift+N');
+  assert.equal(comboOf(ev({ key: 'n', metaKey: true, shiftKey: true }), true), 'Mod+Shift+N');
+  assert.equal(comboOf(ev({ key: 'Tab', ctrlKey: true }), true), 'Mod+Tab'.replace('Mod', 'Ctrl'));
+  assert.equal(comboOf(ev({ key: 'F5' }), false), 'F5');
+  assert.equal(comboOf(ev({ key: 'ArrowLeft', altKey: true }), false), 'Alt+ArrowLeft');
+  assert.equal(comboOf(ev({ key: ' ' }), false), 'Space');
+  assert.equal(comboOf(ev({ key: '+', ctrlKey: true }), false), 'Mod+Plus');
+  assert.equal(comboOf(ev({ key: 'Control', ctrlKey: true }), false), null);
+  assert.equal(comboOf(ev({ key: 'Shift', shiftKey: true }), false), null);
+  // Option+P types a pi sign on a Mac, Shift+1 types "!": the physical key wins
+  assert.equal(comboOf(ev({ key: 'π', code: 'KeyP', altKey: true }), true), 'Alt+P');
+  assert.equal(comboOf(ev({ key: '!', code: 'Digit1', ctrlKey: true, shiftKey: true }), false), 'Mod+Shift+1');
+  // a letter on another keyboard layout keeps what was typed
+  assert.equal(comboOf(ev({ key: 'a', code: 'KeyQ', ctrlKey: true }), false), 'Mod+A');
+});
+
+test('keys: labels and validity', () => {
+  assert.equal(comboLabel('Mod+Shift+N', false), 'Ctrl+Shift+N');
+  assert.equal(comboLabel('Mod+Shift+N', true), 'Cmd+Shift+N');
+  assert.equal(comboLabel('Alt+P', true), 'Option+P');
+  assert.equal(comboLabel('Alt+ArrowLeft', false), 'Alt+←');
+  assert.equal(checkCombo('F2'), null);
+  assert.equal(checkCombo('Delete'), null);
+  assert.equal(checkCombo('Shift+F6'), null);
+  assert.equal(checkCombo('Mod+K'), null);
+  assert.match(checkCombo('A'), /Ctrl, Alt or Cmd/);
+  assert.match(checkCombo('Shift+A'), /Ctrl, Alt or Cmd/);
+  assert.match(checkCombo('ArrowDown'), /Ctrl, Alt or Cmd/);
+  assert.match(checkCombo('Tab'), /Ctrl, Alt or Cmd/);
+  assert.match(checkCombo('Escape'), /Esc/);
+});
+
+test('keys: keymap follows the defaults, then the user\'s changes', () => {
+  const map = buildKeymap({}, false);
+  assert.equal(map.get('Mod+T'), 'newTab');
+  assert.equal(map.get('Backspace'), 'up');
+  assert.equal(map.get('Mod+Backspace'), undefined);
+  assert.equal(buildKeymap({}, true).get('Mod+Backspace'), 'delete');
+  assert.equal(buildKeymap({}, true).get('Ctrl+Tab'), 'nextTab');
+  assert.equal(buildKeymap({}, false).get('Mod+Tab'), 'nextTab');
+
+  // adding a key to an unbound action
+  let r = assignCombo({}, 'compress', 'Mod+Shift+Z', false);
+  assert.equal(r.from.id, 'redo'); // it was taken from Redo
+  assert.deepEqual(r.overrides.compress, ['Mod+Shift+Z']);
+  assert.deepEqual(r.overrides.redo, ['Mod+Y']);
+  const km = buildKeymap(r.overrides, false);
+  assert.equal(km.get('Mod+Shift+Z'), 'compress');
+  assert.equal(km.get('Mod+Y'), 'redo');
+  assert.equal(isModified(actionById('compress'), r.overrides, false), true);
+  assert.equal(isModified(actionById('copy'), r.overrides, false), false);
+
+  // adding to an action that already has keys keeps the old ones
+  r = assignCombo({}, 'delete', 'Mod+D', false);
+  assert.deepEqual(effective(actionById('delete'), r.overrides, false), ['Delete', 'Mod+D']);
+  assert.equal(r.from, null);
+
+  // removing the last key leaves the action unbound
+  const none = removeCombo({}, 'rename', 'F2', false);
+  assert.deepEqual(none.rename, []);
+  assert.equal(buildKeymap(none, false).has('F2'), false);
+
+  // putting things back removes the override entirely
+  assert.deepEqual(removeCombo(none, 'rename', 'nothing', false).rename, []);
+  assert.deepEqual(assignCombo(none, 'rename', 'F2', false).overrides, {});
+  // reset takes the keys back even if another action grabbed them
+  const stolen = assignCombo({}, 'compress', 'F2', false).overrides;
+  assert.deepEqual(stolen.rename, []);
+  const back = resetAction(stolen, 'rename', false);
+  assert.deepEqual(back.rename, undefined);
+  assert.deepEqual(back.compress, undefined);
 });

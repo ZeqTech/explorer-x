@@ -65,6 +65,15 @@ The **Added** column holds a release version, or a date for work not released ye
 | Open with… | Right-click a file: on Windows this opens the system app picker; on macOS and Linux you type the application | 2026-10-15 |
 | Open terminal here | Right-click | initial |
 
+## Keyboard shortcuts
+
+| Feature | How to use it | Added |
+| --- | --- | --- |
+| See every shortcut | **More ▾** then **Keyboard shortcuts…**, or `F1`: all actions grouped, with their keys and a search box | 2026-10-15 |
+| Change shortcuts | In that dialog click **+** (or **Set a shortcut**) next to an action and press the keys. A key belongs to one action, so it is taken from the action that had it. **×** removes a key, **↺** restores an action's default, **Reset all** restores everything. Changes are saved at once | 2026-10-15 |
+| Shortcuts for more actions | Compress, Copy to, Move to, Open with, New text file, Duplicate, Open terminal here, Find duplicates, Pin this folder, Filter bar and Switch view have no key until you give them one | 2026-10-15 |
+| Button tooltips follow your keys | Hover a toolbar button to see its current shortcut | 2026-10-15 |
+
 ## Releases
 
 | Feature | How to use it | Added |

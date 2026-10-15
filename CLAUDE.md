@@ -47,6 +47,15 @@ docs: explain the commit message format
 chore: update tauri to 2.12
 ```
 
+## Keyboard shortcuts
+
+Every key that triggers an action is listed in `ui/keys.js` (`ACTIONS`: id, label, group, default keys), and
+what it does is in the `RUN` table in `ui/renderer.js` (per area: `files`, `pane2`, `nav`, or `any`). Users can
+rebind any action in the Keyboard shortcuts dialog. To add a shortcut-capable action, add it to both places;
+never test `ev.key` for a shortcut directly in the keydown handler. The arrow keys, Home/End, typing to jump
+and Esc are fixed and listed in `FIXED_KEYS`. `Mod` means Ctrl on Windows/Linux and Cmd on macOS.
+`npm test` checks that the defaults never clash.
+
 ## Keeping FEATURES.md current
 
 [FEATURES.md](FEATURES.md) is the list of what the app can do. In the same commit that adds, changes or

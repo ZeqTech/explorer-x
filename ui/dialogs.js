@@ -109,6 +109,87 @@ export function promptDialog({ title, label, value = '', okText = 'OK', multilin
   });
 }
 
+// ---- keyboard shortcuts -----------------------------------------------------------------
+
+/**
+ * Lists every shortcut and lets the user change them. All data goes through `ctl`:
+ *   rows()            -> [{ id, group, label, combos: [{ combo, label }], modified }]
+ *   comboOf(event)    -> combo string, or null while only modifier keys are held
+ *   check(combo)      -> message when the combo cannot be used, else null
+ *   label(combo)      -> how to show a combo
+ *   add(id, combo)    -> text about what happened ("Moved from ..."), may be empty
+ *   remove(id, combo), reset(id), resetAll()
+ *   fixed             -> [[keys, description]] shown as read-only help
+ * Resolves when the dialog is closed.
+ */
+export function shortcutsDialog(ctl) {
+  return new Promise((resolve) => {
+    let close = () => {};
+    let capturing = null; // id of the action waiting for a key press
+    let message = '';
+    let filter = '';
+    const list = el('div', { className: 'keylist' });
+    const status = el('p', { className: 'muted keystatus' }, '');
+    const search = el('input', { className: 'field', type: 'text', placeholder: 'Search shortcuts', spellcheck: false });
+    search.oninput = () => { filter = search.value.trim().toLowerCase(); render(); };
+
+    const finish = () => { document.removeEventListener('keydown', onCapture, true); close(); resolve(); };
+    // While an action is waiting for a key, every key press (except Esc, which cancels) is its new shortcut.
+    function onCapture(ev) {
+      if (!capturing || ev.key === 'Escape') return;
+      ev.preventDefault(); ev.stopPropagation();
+      const combo = ctl.comboOf(ev);
+      if (!combo) return;
+      const problem = ctl.check(combo);
+      if (problem) { message = problem; render(); return; }
+      const id = capturing; capturing = null;
+      const moved = ctl.add(id, combo);
+      message = ctl.label(combo) + ' is set.' + (moved ? ' ' + moved + '.' : '');
+      render();
+    }
+    document.addEventListener('keydown', onCapture, true);
+
+    function render() {
+      list.textContent = '';
+      const rows = ctl.rows().filter((r) => !filter || (r.label + ' ' + r.group + ' ' + r.combos.map((c) => c.label).join(' ')).toLowerCase().includes(filter));
+      let group = null;
+      for (const r of rows) {
+        if (r.group !== group) { group = r.group; list.append(el('div', { className: 'duphead' }, group)); }
+        const chips = r.combos.map((c) => el('span', { className: 'chip' },
+          el('kbd', {}, c.label),
+          el('button', { className: 'chipx', title: 'Remove this shortcut', onclick: () => { ctl.remove(r.id, c.combo); message = ''; render(); } }, '×')));
+        const adding = capturing === r.id;
+        const add = el('button', {
+          className: 'addkey' + (adding ? ' on' : ''),
+          title: 'Press a new key combination for this action',
+          onclick: () => { capturing = adding ? null : r.id; message = adding ? '' : 'Press the new shortcut for “' + r.label + '” (Esc to cancel)'; render(); },
+        }, adding ? 'Press keys…' : r.combos.length ? '+' : 'Set a shortcut');
+        const reset = r.modified ? el('button', { className: 'chipx', title: 'Back to the default', onclick: () => { ctl.reset(r.id); message = ''; render(); } }, '↺') : null;
+        list.append(el('div', { className: 'keyrow' + (r.modified ? ' changed' : '') },
+          el('span', { className: 'keylabel' }, r.label),
+          el('span', { className: 'keychips' }, ...chips, add, reset)));
+      }
+      if (!rows.length) list.append(el('p', { className: 'muted pad' }, 'No shortcuts match “' + filter + '”.'));
+      status.textContent = message;
+    }
+
+    const fixed = el('details', { className: 'keyfixed' }, el('summary', {}, 'Keys that cannot be changed'),
+      ...ctl.fixed.map(([k, d]) => el('div', { className: 'keyrow' }, el('span', { className: 'keychips' }, el('kbd', {}, k)), el('span', { className: 'muted' }, d))));
+    const done = el('button', { className: 'primary', onclick: finish }, 'Done');
+    const body = el('div', { className: 'dlg wide' },
+      el('h3', {}, 'Keyboard shortcuts'),
+      el('p', { className: 'muted' }, 'Click + (or Set a shortcut) and press the keys you want. A shortcut can only belong to one action, so it is taken away from the action that had it. Your changes are saved right away.'),
+      search, list, status, fixed,
+      el('div', { className: 'btns spread' },
+        el('button', { onclick: () => { ctl.resetAll(); capturing = null; message = 'All shortcuts are back to their defaults.'; render(); } }, 'Reset all'),
+        done));
+    // Esc cancels a pending capture first, and only closes the dialog when nothing is pending
+    close = show(body, { onEscape: () => { if (capturing) { capturing = null; message = ''; render(); } else finish(); } });
+    render();
+    search.focus();
+  });
+}
+
 // ---- choose a folder -----------------------------------------------------------------
 
 /**

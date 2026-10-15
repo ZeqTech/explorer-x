@@ -1,6 +1,7 @@
 import { iconKey, fmtSize, fmtDate, fmtDateTime, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves, parsePins, planRename, matchesFilter, NO_FILTER, filterActive } from './format.js';
 import { UndoStack } from './undo.js';
-import { el, conflictDialog, promptDialog, chooseFolderDialog, batchRenameDialog, duplicatesDialog, progressDialog, propertiesDialog, multiPropertiesDialog, dialogOpen } from './dialogs.js';
+import { ACTIONS, FIXED_KEYS, comboOf, comboLabel, checkCombo, buildKeymap, assignCombo, removeCombo, resetAction, effective, isModified, actionById } from './keys.js';
+import { el, conflictDialog, promptDialog, shortcutsDialog, chooseFolderDialog, batchRenameDialog, duplicatesDialog, progressDialog, propertiesDialog, multiPropertiesDialog, dialogOpen } from './dialogs.js';
 
 (() => {
   const api = window.fsapi;
@@ -8,11 +9,11 @@ import { el, conflictDialog, promptDialog, chooseFolderDialog, batchRenameDialog
   const state = {
     cwd: null, history: [], hi: -1, entries: [], sel: new Set(), anchor: null,
     sortKey: 'name', sortDir: 1, view: 'details', showHidden: false, preview: false, cut: new Set(),
-    mac: false, sep: '/', searchMode: false, pins: [], pinNames: {}, recent: [], searches: [], filter: { ...NO_FILTER }, icon: 64, navw: 230,
+    mac: false, sep: '/', searchMode: false, pins: [], pinNames: {}, recent: [], searches: [], keys: {}, filter: { ...NO_FILTER }, icon: 64, navw: 230,
   };
 
   // Per-user preferences, persisted in localStorage (best effort).
-  const PREF_KEYS = ['pins', 'pinNames', 'recent', 'searches', 'icon', 'navw', 'view', 'sortKey', 'sortDir', 'showHidden', 'preview'];
+  const PREF_KEYS = ['pins', 'pinNames', 'recent', 'searches', 'keys', 'icon', 'navw', 'view', 'sortKey', 'sortDir', 'showHidden', 'preview'];
   const savePrefs = () => {
     try { localStorage.setItem('explorerx', JSON.stringify(Object.fromEntries(PREF_KEYS.map((k) => [k, state[k]])))); } catch { /* ignore */ }
   };
@@ -63,8 +64,8 @@ import { el, conflictDialog, promptDialog, chooseFolderDialog, batchRenameDialog
   const updateUndoUi = () => {
     $('undo').disabled = !undoStack.canUndo;
     $('redo').disabled = !undoStack.canRedo;
-    $('undo').title = undoStack.canUndo ? 'Undo ' + undoStack.undoLabel + ' (Ctrl+Z)' : 'Nothing to undo';
-    $('redo').title = undoStack.canRedo ? 'Redo ' + undoStack.redoLabel + ' (Ctrl+Y)' : 'Nothing to redo';
+    $('undo').title = undoStack.canUndo ? 'Undo ' + undoStack.undoLabel + hintFor('undo') : 'Nothing to undo';
+    $('redo').title = undoStack.canRedo ? 'Redo ' + undoStack.redoLabel + hintFor('redo') : 'Nothing to redo';
   };
   const record = (entry) => { undoStack.push(entry); updateUndoUi(); };
   const doUndo = guard(async () => {
@@ -159,14 +160,14 @@ import { el, conflictDialog, promptDialog, chooseFolderDialog, batchRenameDialog
       const tab = document.createElement('div');
       tab.className = 'tab' + (i === activeTab ? ' active' : ''); tab.title = t.cwd || '';
       const name = document.createElement('span'); name.className = 'tabname'; name.textContent = label;
-      const x = document.createElement('button'); x.className = 'tabclose'; x.textContent = '×'; x.title = 'Close tab (Ctrl+W)';
+      const x = document.createElement('button'); x.className = 'tabclose'; x.textContent = '×'; x.title = 'Close tab' + hintFor('closeTab');
       x.onclick = (ev) => { ev.stopPropagation(); closeTab(i); };
       tab.onclick = () => switchTab(i);
       tab.onauxclick = (ev) => { if (ev.button === 1) { ev.preventDefault(); closeTab(i); } };
       tab.append(name, x);
       bar.appendChild(tab);
     });
-    const plus = document.createElement('button'); plus.className = 'tabnew'; plus.textContent = '+'; plus.title = 'New tab (Ctrl+T)';
+    const plus = document.createElement('button'); plus.className = 'tabnew'; plus.textContent = '+'; plus.title = 'New tab' + hintFor('newTab');
     plus.onclick = () => newTab();
     bar.appendChild(plus);
   }
@@ -881,7 +882,8 @@ import { el, conflictDialog, promptDialog, chooseFolderDialog, batchRenameDialog
   // ---- context menu -----------------------------------------------------
   function showCustomMenu(x, y, items) { showMenu(x, y, false, items); }
   function showMenu(x, y, onItem, custom) {
-    const m = $('menu'); m.textContent = ''; const one = state.sel.size === 1;
+    // count what is really on screen: a path left over from before a refresh must not count
+    const m = $('menu'); m.textContent = ''; const one = selected().length === 1;
     const oneDir = one && selected()[0].isDir, pinned = oneDir && state.pins.includes(selected()[0].path);
     const items = custom || (onItem ? [
       ['Open', () => one && openEntry(selected()[0]), one],
@@ -1175,15 +1177,6 @@ import { el, conflictDialog, promptDialog, chooseFolderDialog, batchRenameDialog
       case 'ArrowUp': return move(cur < 0 ? 0 : cur - 1);
       case 'Home': return move(0);
       case 'End': return move(items.length - 1);
-      case 'Enter': if (!d) return false; ev.preventDefault(); d.click(); return true;
-      case 'Delete':
-        if (!d) return false;
-        ev.preventDefault();
-        if (d.classList.contains('pin')) togglePin(d.dataset.path);
-        else if (d.classList.contains('saved')) { const i = state.searches.findIndex((sv) => sv.name === d.textContent); if (i >= 0) { state.searches.splice(i, 1); savePrefs(); renderNav(false); } }
-        else if (d.dataset.path && state.recent.includes(d.dataset.path)) forgetRecent(d.dataset.path);
-        return true;
-      case 'F2': if (d && d.classList.contains('pin')) { ev.preventDefault(); guard(renamePin)(d.dataset.path); return true; } return false;
       case 'ContextMenu': case 'F10': {
         if (ev.key === 'F10' && !ev.shiftKey) return false;
         if (!d || !d.oncontextmenu) return false;
@@ -1222,30 +1215,139 @@ import { el, conflictDialog, promptDialog, chooseFolderDialog, batchRenameDialog
     if (c.cut && done.length) await api.clipboardWrite([], false);
     state.cut = new Set(); await refresh(); await p2refresh();
   });
+  // arrow keys, Home and End in the second pane; everything else is a shortcut (see RUN below)
   function p2Keys(ev) {
-    const mod = state.mac ? ev.metaKey : ev.ctrlKey, k = ev.key.toLowerCase();
     const cur = p2cursor();
     if (ev.key === 'ArrowDown') { ev.preventDefault(); p2Move(cur < 0 ? 0 : cur + 1, ev.shiftKey); return true; }
     if (ev.key === 'ArrowUp' && !ev.altKey) { ev.preventDefault(); p2Move(cur < 0 ? 0 : cur - 1, ev.shiftKey); return true; }
     if (ev.key === 'Home') { ev.preventDefault(); p2Move(0, ev.shiftKey); return true; }
     if (ev.key === 'End') { ev.preventDefault(); p2Move(p2shown.length - 1, ev.shiftKey); return true; }
-    if (ev.key === 'Enter') { const s = p2selected(); if (s.length === 1) { ev.preventDefault(); p2Open(s[0]); return true; } return false; }
-    if (ev.key === 'Backspace' || (ev.altKey && ev.key === 'ArrowUp')) { ev.preventDefault(); $('p2up').click(); return true; }
-    if (ev.key === 'Delete') { ev.preventDefault(); guard(p2Delete)(); return true; }
-    if (ev.key === 'F5') { ev.preventDefault(); refresh(); p2refresh(); return true; }
-    if (mod && k === 'a') { ev.preventDefault(); pane2.sel = new Set(p2shown.map((e) => e.path)); paintP2(); return true; }
-    if (mod && k === 'c') { ev.preventDefault(); p2Clip(false); return true; }
-    if (mod && k === 'x') { ev.preventDefault(); p2Clip(true); return true; }
-    if (mod && k === 'v') { ev.preventDefault(); p2Paste(); return true; }
     return false;
   }
 
-  // ---- keyboard ---------------------------------------------------------
+  // ---- keyboard shortcuts -----------------------------------------------------
+  // keys.js lists every action with its default keys; the user's changes live in state.keys. RUN says
+  // what each action does, per area: the file list ("files"), the second pane ("pane2") and the
+  // sidebar ("nav"). `any` works everywhere. An action with no entry for the current area does nothing.
+  const focusedNavItem = () => navItems().find((d) => d.classList.contains('kfocus'));
+  const RUN = {
+    back: { any: back },
+    forward: { any: fwd },
+    up: { files: up, pane2: () => $('p2up').click() },
+    refresh: { any: () => { refresh(); p2refresh(); } },
+    address: { any: () => $('crumbs').click() },
+    search: { any: () => $('search').focus() },
+    focusNext: { any: () => cycleArea(1) },
+    focusPrev: { any: () => cycleArea(-1) },
+    pinCurrent: { any: () => togglePin(state.cwd) },
+    newTab: { any: () => newTab() },
+    closeTab: { any: () => closeTab(activeTab) },
+    nextTab: { any: () => cycleTab(1) },
+    prevTab: { any: () => cycleTab(-1) },
+    open: {
+      files: () => { const e = selected(); if (e.length === 1) guard(openEntry)(e[0]); },
+      pane2: () => { const e = p2selected(); if (e.length === 1) p2Open(e[0]); },
+      nav: () => { const d = focusedNavItem(); if (d) d.click(); },
+    },
+    rename: {
+      files: startRename,
+      nav: () => { const d = focusedNavItem(); if (d && d.classList.contains('pin')) guard(renamePin)(d.dataset.path); },
+    },
+    delete: {
+      files: doDelete,
+      pane2: () => guard(p2Delete)(),
+      nav: () => {
+        const d = focusedNavItem(); if (!d) return;
+        if (d.classList.contains('pin')) togglePin(d.dataset.path);
+        else if (d.classList.contains('saved')) { const i = state.searches.findIndex((sv) => sv.name === d.textContent); if (i >= 0) { state.searches.splice(i, 1); savePrefs(); renderNav(false); } }
+        else if (d.dataset.path && state.recent.includes(d.dataset.path)) forgetRecent(d.dataset.path);
+      },
+    },
+    newFolder: { files: doNewFolder },
+    newFile: { files: doNewFile },
+    duplicate: { files: doDuplicate },
+    compress: { files: doCompress },
+    copyTo: { files: () => doCopyMoveTo('copy') },
+    moveTo: { files: () => doCopyMoveTo('move') },
+    openWith: { files: doOpenWith },
+    terminal: { files: () => doTerminal(state.cwd), nav: () => doTerminal(state.cwd), pane2: () => doTerminal(pane2.cwd || state.cwd) },
+    findDuplicates: { files: () => doFindDuplicates(state.cwd), pane2: () => doFindDuplicates(pane2.cwd || state.cwd) },
+    properties: { files: doProperties },
+    copy: { files: () => doCopy(false), pane2: () => p2Clip(false) },
+    cut: { files: () => doCopy(true), pane2: () => p2Clip(true) },
+    paste: { files: doPaste, pane2: p2Paste },
+    copyPath: { files: () => doCopyPath() },
+    selectAll: {
+      files: () => { state.sel = new Set(shown.map((e) => e.path)); paintSel(); },
+      pane2: () => { pane2.sel = new Set(p2shown.map((e) => e.path)); paintP2(); },
+    },
+    undo: { any: doUndo },
+    redo: { any: doRedo },
+    preview: { any: togglePreview },
+    hidden: { any: () => $('hidden').click() },
+    split: { any: toggleSplit },
+    filter: { any: () => $('filterBtn').click() },
+    toggleView: { any: () => $('view').click() },
+    shortcuts: { any: () => openShortcuts() },
+  };
+  for (let n = 1; n <= 9; n++) RUN['pin' + n] = { any: () => { const p = state.pins[n - 1]; if (p) go(p); } };
+
+  let keymap = new Map();
+  // " (Ctrl+Z)" for an action's first key, or "" when it has none; used in button tooltips
+  function hintFor(id) {
+    const c = effective(actionById(id), state.keys, state.mac)[0];
+    return c ? ' (' + comboLabel(c, state.mac) + ')' : '';
+  }
+  const HINT_BUTTONS = {
+    back: 'back', forward: 'fwd', up: 'up', refresh: 'refresh', newFolder: 'newFolder', cut: 'cut', copy: 'copy', paste: 'paste',
+    rename: 'renameBtn', delete: 'delete', preview: 'previewBtn', hidden: 'hidden', split: 'splitBtn', filter: 'filterBtn', toggleView: 'view',
+  };
+  // Rebuilds the key lookup and the button tooltips after the shortcuts change.
+  function rebuildKeymap() {
+    keymap = buildKeymap(state.keys, state.mac);
+    for (const [id, btn] of Object.entries(HINT_BUTTONS)) {
+      const b = $(btn); if (!b) continue;
+      if (!b.dataset.hint) b.dataset.hint = actionById(id).label;
+      b.title = b.dataset.hint + hintFor(id);
+    }
+    updateUndoUi(); renderTabs();
+  }
+  const keysChanged = () => { savePrefs(); rebuildKeymap(); };
+
+  function openShortcuts() {
+    return shortcutsDialog({
+      rows: () => ACTIONS.map((a) => ({
+        id: a.id, group: a.group, label: a.label, modified: isModified(a, state.keys, state.mac),
+        combos: effective(a, state.keys, state.mac).map((c) => ({ combo: c, label: comboLabel(c, state.mac) })),
+      })),
+      comboOf: (ev) => comboOf(ev, state.mac),
+      check: checkCombo,
+      label: (c) => comboLabel(c, state.mac),
+      add: (id, combo) => {
+        const r = assignCombo(state.keys, id, combo, state.mac);
+        state.keys = r.overrides; keysChanged();
+        return r.from ? 'It was taken away from \u201C' + r.from.label + '\u201D' : '';
+      },
+      remove: (id, combo) => { state.keys = removeCombo(state.keys, id, combo, state.mac); keysChanged(); },
+      reset: (id) => { state.keys = resetAction(state.keys, id, state.mac); keysChanged(); },
+      resetAll: () => { state.keys = {}; keysChanged(); },
+      fixed: FIXED_KEYS.map(([k, d]) => [k.replace('{mod}', state.mac ? 'Cmd' : 'Ctrl'), d]),
+    });
+  }
+  // the dropdown next to the view buttons
+  $('moreBtn').onclick = (ev) => {
+    ev.stopPropagation();
+    const r = $('moreBtn').getBoundingClientRect();
+    showCustomMenu(r.left, r.bottom, [
+      ['Keyboard shortcuts\u2026' + hintFor('shortcuts'), () => openShortcuts()],
+      ['Reset shortcuts to defaults', () => { state.keys = {}; keysChanged(); toast('Shortcuts are back to their defaults'); }, Object.keys(state.keys).length > 0],
+    ]);
+  };
+
   let typed = '', typedTimer = 0;
   document.addEventListener('keydown', (ev) => {
     if (dialogOpen()) return;
     if (ev.target.tagName === 'INPUT' && ev.target.type !== 'range') return;
-    if (ev.key === 'F6') { ev.preventDefault(); cycleArea(ev.shiftKey ? -1 : 1); return; }
     const area = currentArea();
     if (area === 'nav' && navKeys(ev)) return;
     if (area === 'pane2' && p2Keys(ev)) return;
@@ -1256,38 +1358,16 @@ import { el, conflictDialog, promptDialog, chooseFolderDialog, batchRenameDialog
       if (hit) { select(hit, {}); const el = document.querySelector('[data-path="' + CSS.escape(hit.path) + '"]'); if (el) el.scrollIntoView({ block: 'nearest' }); }
       return;
     }
-    const mod = state.mac ? ev.metaKey : ev.ctrlKey, k = ev.key.toLowerCase();
-    if (ev.altKey && k === 'p') { ev.preventDefault(); togglePreview(); }
-    else if ((ev.altKey && ev.key === 'Enter') || (state.mac && ev.metaKey && k === 'i')) { ev.preventDefault(); doProperties(); }
-    else if (mod && /^[1-9]$/.test(ev.key) && state.pins[+ev.key - 1]) { ev.preventDefault(); go(state.pins[+ev.key - 1]); }
-    else if (mod && k === 't') { ev.preventDefault(); newTab(); }
-    else if (ev.ctrlKey && k === 'w') { ev.preventDefault(); closeTab(activeTab); }
-    else if (ev.ctrlKey && ev.key === 'Tab') { ev.preventDefault(); cycleTab(ev.shiftKey ? -1 : 1); }
-    else if (mod && k === 'z') { ev.preventDefault(); if (ev.shiftKey) doRedo(); else doUndo(); }
-    else if (mod && k === 'y') { ev.preventDefault(); doRedo(); }
-    else if (mod && ev.shiftKey && k === 'c') doCopyPath();
-    else if (mod && k === 'c') doCopy(false);
-    else if (mod && k === 'x') doCopy(true);
-    else if (mod && k === 'v') doPaste();
-    else if (mod && k === 'a') { ev.preventDefault(); state.sel = new Set(shown.map((e) => e.path)); paintSel(); }
-    else if (mod && k === 'l') { $('crumbs').click(); ev.preventDefault(); }
-    else if (mod && k === 'f') { $('search').focus(); ev.preventDefault(); }
-    else if (mod && k === 'h') { $('hidden').click(); ev.preventDefault(); }
-    else if (mod && ev.shiftKey && k === 'n') doNewFolder();
-    else if (ev.key === 'F2') startRename();
-    else if (ev.key === 'F5') { refresh(); p2refresh(); }
-    else if (mod && ev.key === '\\') { ev.preventDefault(); toggleSplit(); }
-    else if (ev.key === 'Delete' || (state.mac && ev.metaKey && ev.key === 'Backspace')) doDelete();
-    else if (ev.key === 'Enter' || (state.mac && ev.metaKey && ev.key === 'ArrowDown')) { const s = selected(); if (s.length === 1) guard(openEntry)(s[0]); }
-    else if (ev.key === 'Backspace' || (ev.altKey && ev.key === 'ArrowUp') || (state.mac && ev.metaKey && ev.key === 'ArrowUp')) up();
-    else if (ev.altKey && ev.key === 'ArrowLeft' || (state.mac && ev.metaKey && ev.key === '[')) back();
-    else if (ev.altKey && ev.key === 'ArrowRight' || (state.mac && ev.metaKey && ev.key === ']')) fwd();
-    else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    // a focused button or drop-down keeps Enter and Space for itself
+    const control = ev.target.tagName === 'BUTTON' || ev.target.tagName === 'SELECT';
+    const combo = comboOf(ev, state.mac), id = combo && keymap.get(combo);
+    const run = id && RUN[id] && (RUN[id][area] || RUN[id].any);
+    if (run && !(control && (ev.key === 'Enter' || ev.key === ' '))) { ev.preventDefault(); run(); return; }
+    if (area === 'files' && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
       ev.preventDefault(); if (!shown.length) return;
       const cur = shown.findIndex((e) => e.path === state.anchor);
       const next = Math.max(0, Math.min(shown.length - 1, cur < 0 ? 0 : cur + (ev.key === 'ArrowDown' ? 1 : -1)));
       select(shown[next], { shiftKey: ev.shiftKey });
-      if (ev.shiftKey) state.anchor = state.anchor; // keep range anchor stable
       const el = document.querySelector('[data-path="' + CSS.escape(shown[next].path) + '"]'); if (el) el.scrollIntoView({ block: 'nearest' });
     }
   });
@@ -1297,7 +1377,7 @@ import { el, conflictDialog, promptDialog, chooseFolderDialog, batchRenameDialog
     const plat = await api.platform();
     state.mac = plat === 'darwin'; state.sep = plat === 'win32' ? '\\' : '/';
     if (state.mac) document.body.classList.add('mac');
-    loadPrefs(); applyLayout();
+    loadPrefs(); applyLayout(); rebuildKeymap();
     $('hidden').classList.toggle('on', state.showHidden);
     $('preview').hidden = !state.preview; $('previewBtn').classList.toggle('on', state.preview);
     $('sort').value = state.sortKey;
