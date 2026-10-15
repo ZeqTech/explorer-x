@@ -23,6 +23,8 @@ The **Added** column holds a release version, or a date for work not released ye
 | Type-ahead | Type a few letters to jump to a matching file | initial |
 | Search | The search box searches the current folder and everything below it | initial |
 | Show hidden items | **Hidden** button or `Ctrl+H` | initial |
+| Keyboard navigation in the sidebar | `F6` moves focus between the file list, the second pane and the sidebar (`Shift+F6` goes back). In the sidebar: arrows, `Home`/`End`, `Enter` to open, `Delete` to unpin, `F2` to rename a pin, `Alt+Up`/`Alt+Down` to reorder, `Shift+F10` for the menu | 2026-10-15 |
+| Keyboard navigation in the split pane | With the second pane focused: arrows (with `Shift` to extend), `Enter`, `Backspace`, `Delete`, `Ctrl+A`, `Ctrl+C`/`X`/`V` | 2026-10-15 |
 | Sort folders by size | Sort by **Size**: folder sizes are calculated in the background | 2026-10-15 |
 | Split view | **Split** button or `Ctrl+\`: a second pane with its own folder; drag files between panes or use Copy to / Move to other pane | 2026-10-15 |
 | Saved searches | **Save** next to the search box adds the search to the sidebar | 2026-10-15 |

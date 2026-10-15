@@ -306,6 +306,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
           ]);
         };
         d.onclick = () => {
+          setNavFocus(d);
           if (d.classList.contains('missing')) { toast('Folder not found: ' + it.path); return; }
           go(it.path);
         };
@@ -345,7 +346,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     }
     section('Quick access', places.quick);
     section('This computer', places.drives);
-    renderNavActive();
+    renderNavActive(); restoreNavFocus();
     markMissingPins(reload);
   }
   // Pins whose folder is gone (deleted, or a drive that is not connected) are struck through.
@@ -920,7 +921,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
   async function p2go(dir) {
     try { pane2.entries = await api.list(dir, state.showHidden); }
     catch (e) { toast('Cannot open ' + dir + ': ' + e.message); return; }
-    pane2.cwd = dir; pane2.sel.clear(); pane2.anchor = null;
+    pane2.cwd = dir; pane2.sel.clear(); pane2.anchor = null; pane2.cursor = null;
     renderPane2(); saveSession();
   }
   const p2refresh = () => (pane2.open && pane2.cwd ? p2go(pane2.cwd) : null);
@@ -943,6 +944,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     } else if (mod) {
       pane2.sel.has(e.path) ? pane2.sel.delete(e.path) : pane2.sel.add(e.path); pane2.anchor = e.path;
     } else { pane2.sel = new Set([e.path]); pane2.anchor = e.path; }
+    pane2.cursor = e.path;
     paintP2();
   }
 
@@ -1024,22 +1026,132 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
         record({ label: 'New folder', undo: () => api.trash([p]), redo: () => api.createPath(p, true) });
         await p2refresh();
       })],
-      ['Paste', guard(async () => {
-        const c = await api.clipboardRead(); if (!c || !c.paths.length) return;
-        const done = await transfer(c.cut ? 'move' : 'copy', c.paths, pane2.cwd);
-        if (c.cut && done.length) await api.clipboardWrite([], false);
-        state.cut = new Set(); await refresh(); await p2refresh();
-      })],
+      ['Paste', p2Paste],
       ['Refresh', p2refresh],
       ['Open this folder in the main pane', () => go(pane2.cwd)],
     ]);
   };
+
+  // ---- keyboard focus: sidebar and second pane ------------------------------------
+  // F6 / Shift+F6 move the keyboard between the file list, the second pane (when open) and the sidebar.
+  // Each area handles its own arrow keys, Enter and Delete; everything else falls through to the
+  // shared shortcuts below.
+  const currentArea = () => {
+    const a = document.activeElement;
+    if (a && a.closest) { if (a.closest('#nav')) return 'nav'; if (a.closest('#pane2')) return 'pane2'; }
+    return 'files';
+  };
+  function cycleArea(dir) {
+    const order = ['files', ...(pane2.open ? ['pane2'] : []), 'nav'];
+    const next = order[(order.indexOf(currentArea()) + dir + order.length) % order.length];
+    if (next === 'nav') {
+      const items = navItems();
+      const start = items.find((d) => d.classList.contains('kfocus')) || items.find((d) => d.dataset.path === state.cwd) || items[0];
+      $('nav').focus(); setNavFocus(start);
+    } else $(next === 'pane2' ? 'p2list' : 'files').focus();
+    toast(next === 'nav' ? 'Sidebar' : next === 'pane2' ? 'Second pane' : 'File list');
+  }
+
+  // sidebar
+  let navKey = null;
+  const navItems = () => [...document.querySelectorAll('#nav > div')];
+  const navKeyOf = (d) => d.dataset.path || ('s:' + d.textContent);
+  function setNavFocus(d) {
+    navKey = d ? navKeyOf(d) : null;
+    for (const x of navItems()) x.classList.toggle('kfocus', x === d);
+    if (d) d.scrollIntoView({ block: 'nearest' });
+  }
+  const restoreNavFocus = () => { const d = navKey && navItems().find((x) => navKeyOf(x) === navKey); if (d) d.classList.add('kfocus'); };
+  // Returns true when the key was used.
+  function navKeys(ev) {
+    const items = navItems(); if (!items.length) return false;
+    const cur = items.findIndex((d) => d.classList.contains('kfocus'));
+    const move = (i) => { ev.preventDefault(); setNavFocus(items[Math.max(0, Math.min(items.length - 1, i))]); return true; };
+    const d = items[cur];
+    // Alt+Up / Alt+Down reorder the focused pin
+    if (ev.altKey && d && d.classList.contains('pin') && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown')) {
+      ev.preventDefault(); movePin(d.dataset.path, ev.key === 'ArrowUp' ? -1 : 1); return true;
+    }
+    switch (ev.key) {
+      case 'ArrowDown': return move(cur + 1);
+      case 'ArrowUp': return move(cur < 0 ? 0 : cur - 1);
+      case 'Home': return move(0);
+      case 'End': return move(items.length - 1);
+      case 'Enter': if (!d) return false; ev.preventDefault(); d.click(); return true;
+      case 'Delete':
+        if (!d) return false;
+        ev.preventDefault();
+        if (d.classList.contains('pin')) togglePin(d.dataset.path);
+        else if (d.classList.contains('saved')) { const i = state.searches.findIndex((sv) => sv.name === d.textContent); if (i >= 0) { state.searches.splice(i, 1); savePrefs(); renderNav(false); } }
+        else if (d.dataset.path && state.recent.includes(d.dataset.path)) forgetRecent(d.dataset.path);
+        return true;
+      case 'F2': if (d && d.classList.contains('pin')) { ev.preventDefault(); guard(renamePin)(d.dataset.path); return true; } return false;
+      case 'ContextMenu': case 'F10': {
+        if (ev.key === 'F10' && !ev.shiftKey) return false;
+        if (!d || !d.oncontextmenu) return false;
+        ev.preventDefault();
+        const r = d.getBoundingClientRect();
+        d.oncontextmenu({ preventDefault() {}, stopPropagation() {}, clientX: r.left + 24, clientY: r.bottom });
+        return true;
+      }
+      default: break;
+    }
+    return false;
+  }
+
+  // second pane
+  const p2cursor = () => p2shown.findIndex((e) => e.path === (pane2.cursor || pane2.anchor));
+  function p2Move(i, extend) {
+    if (!p2shown.length) return;
+    i = Math.max(0, Math.min(p2shown.length - 1, i));
+    const e = p2shown[i];
+    if (extend && pane2.anchor) {
+      const a = p2shown.findIndex((x) => x.path === pane2.anchor);
+      pane2.sel = new Set(p2shown.slice(Math.min(a, i), Math.max(a, i) + 1).map((x) => x.path));
+    } else { pane2.sel = new Set([e.path]); pane2.anchor = e.path; }
+    pane2.cursor = e.path;
+    paintP2();
+    const row = document.querySelector('#p2list [data-p2="' + CSS.escape(e.path) + '"]'); if (row) row.scrollIntoView({ block: 'nearest' });
+  }
+  const p2Open = guard(async (e) => { if (e.isDir) await p2go(e.path); else await api.open(e.path); });
+  const p2Clip = guard(async (cut) => {
+    const paths = p2selected().map((e) => e.path); if (!paths.length) return;
+    await api.clipboardWrite(paths, cut); toast((cut ? 'Cut ' : 'Copied ') + plural(paths.length, 'item'));
+  });
+  const p2Paste = guard(async () => {
+    const c = await api.clipboardRead(); if (!c || !c.paths.length) return;
+    const done = await transfer(c.cut ? 'move' : 'copy', c.paths, pane2.cwd);
+    if (c.cut && done.length) await api.clipboardWrite([], false);
+    state.cut = new Set(); await refresh(); await p2refresh();
+  });
+  function p2Keys(ev) {
+    const mod = state.mac ? ev.metaKey : ev.ctrlKey, k = ev.key.toLowerCase();
+    const cur = p2cursor();
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); p2Move(cur < 0 ? 0 : cur + 1, ev.shiftKey); return true; }
+    if (ev.key === 'ArrowUp' && !ev.altKey) { ev.preventDefault(); p2Move(cur < 0 ? 0 : cur - 1, ev.shiftKey); return true; }
+    if (ev.key === 'Home') { ev.preventDefault(); p2Move(0, ev.shiftKey); return true; }
+    if (ev.key === 'End') { ev.preventDefault(); p2Move(p2shown.length - 1, ev.shiftKey); return true; }
+    if (ev.key === 'Enter') { const s = p2selected(); if (s.length === 1) { ev.preventDefault(); p2Open(s[0]); return true; } return false; }
+    if (ev.key === 'Backspace' || (ev.altKey && ev.key === 'ArrowUp')) { ev.preventDefault(); $('p2up').click(); return true; }
+    if (ev.key === 'Delete') { ev.preventDefault(); guard(p2Delete)(); return true; }
+    if (ev.key === 'F5') { ev.preventDefault(); refresh(); p2refresh(); return true; }
+    if (mod && k === 'a') { ev.preventDefault(); pane2.sel = new Set(p2shown.map((e) => e.path)); paintP2(); return true; }
+    if (mod && k === 'c') { ev.preventDefault(); p2Clip(false); return true; }
+    if (mod && k === 'x') { ev.preventDefault(); p2Clip(true); return true; }
+    if (mod && k === 'v') { ev.preventDefault(); p2Paste(); return true; }
+    return false;
+  }
 
   // ---- keyboard ---------------------------------------------------------
   let typed = '', typedTimer = 0;
   document.addEventListener('keydown', (ev) => {
     if (dialogOpen()) return;
     if (ev.target.tagName === 'INPUT' && ev.target.type !== 'range') return;
+    if (ev.key === 'F6') { ev.preventDefault(); cycleArea(ev.shiftKey ? -1 : 1); return; }
+    const area = currentArea();
+    if (area === 'nav' && navKeys(ev)) return;
+    if (area === 'pane2' && p2Keys(ev)) return;
+    if (area !== 'files' && ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) return; // typing only jumps in the file list
     if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey && ev.key !== ' ') {
       typed += ev.key.toLowerCase(); clearTimeout(typedTimer); typedTimer = setTimeout(() => { typed = ''; }, 800);
       const hit = shown.find((e) => e.name.toLowerCase().startsWith(typed));
