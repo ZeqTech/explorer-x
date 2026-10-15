@@ -1,6 +1,6 @@
 mod fs_service;
 
-use fs_service::{Conflict, DirStats, Entry, Hit, Moved, Place, Progress, Props, Res, Resolutions, CANCELLED};
+use fs_service::{Conflict, DirStats, DupGroup, Entry, Hit, Moved, Place, Progress, Props, Res, Resolutions, CANCELLED};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -229,6 +229,11 @@ async fn import_explorer_pins() -> Res<Vec<String>> {
 }
 
 #[tauri::command]
+async fn find_duplicates(app: AppHandle, ops: State<'_, Ops>, op_id: String, root: String) -> Res<Vec<DupGroup>> {
+    let srcs = vec![root.clone()];
+    run_op(app, &ops, op_id, srcs, move |p| fs_service::find_duplicates(&root, p)).await
+}
+#[tauri::command]
 async fn compress_paths(paths: Vec<String>) -> Res<String> {
     blocking(move || fs_service::compress(&paths)).await
 }
@@ -428,7 +433,7 @@ pub fn run() {
             list_dir, copy_into, move_into, rename_path, make_dir, new_file, search, drives, quick_access,
             trash_paths, open_path, reveal_path, is_dir, home_dir, platform, new_window, clipboard_write,
             clipboard_read, clipboard_text, open_terminal, cancel_op, find_conflicts, rename_many, create_path,
-            properties, dir_stats, text_preview, restore_trashed, file_icon, import_explorer_pins, compress_paths, extract_zip
+            properties, dir_stats, text_preview, restore_trashed, file_icon, import_explorer_pins, compress_paths, extract_zip, find_duplicates
         ])
         .build(tauri::generate_context!())
         .expect("error while building Explorer X");

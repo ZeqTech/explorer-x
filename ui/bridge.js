@@ -30,6 +30,7 @@
     search: (root, query) => call('search', { root, query }),
     drives: () => call('drives'),
     quickAccess: () => call('quick_access'),
+    findDuplicates: (root, opId) => call('find_duplicates', { opId, root }),
     compress: (paths) => call('compress_paths', { paths }),
     extractZip: (path) => call('extract_zip', { path }),
     importExplorerPins: () => call('import_explorer_pins'),

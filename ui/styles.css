@@ -105,6 +105,12 @@ body.resizing { cursor: col-resize; }
 .rrow.bad .new { color: #d13438; }
 .rrow .arrow { color: var(--muted); text-align: center; }
 .dlg button:disabled { opacity: .5; }
+.duplist { max-height: 360px; overflow: auto; margin-top: 10px; border: 1px solid var(--line); border-radius: 4px; }
+.duphead { position: sticky; top: 0; padding: 4px 8px; background: var(--bar); color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); }
+.duprow { display: flex; align-items: center; gap: 8px; padding: 3px 8px; cursor: pointer; }
+.duprow:hover { background: var(--hover); }
+.duprow span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dlg .btns.spread { justify-content: space-between; align-items: center; }
 .dlg.props { width: min(520px, calc(100vw - 32px)); }
 .prow { display: grid; grid-template-columns: 96px 1fr; gap: 10px; padding: 3px 0; border-bottom: 1px solid var(--line); }
 .prow:last-of-type { border-bottom: 0; }

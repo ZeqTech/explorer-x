@@ -380,6 +380,86 @@ pub fn rename_many(pairs: &[Moved]) -> Res<()> {
     Ok(())
 }
 
+// ---- duplicate files ---------------------------------------------------------
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DupGroup {
+    pub size: u64,
+    pub paths: Vec<String>,
+}
+
+/// SHA-256 of the first `limit` bytes of a file (all of it when `limit` is None).
+fn hash_file(path: &Path, limit: Option<u64>, p: &mut dyn Progress) -> Res<[u8; 32]> {
+    use sha2::{Digest, Sha256};
+    let mut f = fs::File::open(path).map_err(err)?;
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 256 * 1024];
+    let mut left = limit.unwrap_or(u64::MAX);
+    while left > 0 {
+        let want = buf.len().min(left.min(usize::MAX as u64) as usize);
+        let n = f.read(&mut buf[..want]).map_err(err)?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+        left -= n as u64;
+        p.advance(n as u64, &path.to_string_lossy())?;
+    }
+    Ok(h.finalize().into())
+}
+
+/// Finds files under `root` with identical contents: same size, then same first 64 KB, then same
+/// SHA-256 of the whole file. Empty files and symlinks are ignored. Biggest wasted space first.
+pub fn find_duplicates(root: &str, p: &mut dyn Progress) -> Res<Vec<DupGroup>> {
+    fn walk(dir: &Path, by_size: &mut HashMap<u64, Vec<PathBuf>>) {
+        let Ok(rd) = fs::read_dir(dir) else { return };
+        for e in rd.flatten() {
+            let Ok(md) = fs::symlink_metadata(e.path()) else { continue };
+            if md.is_dir() {
+                walk(&e.path(), by_size);
+            } else if md.is_file() && md.len() > 0 {
+                by_size.entry(md.len()).or_default().push(e.path());
+            }
+        }
+    }
+    let mut by_size = HashMap::new();
+    walk(Path::new(root), &mut by_size);
+
+    let mut groups = Vec::new();
+    for (size, files) in by_size.into_iter().filter(|(_, f)| f.len() > 1) {
+        let mut by_head: HashMap<[u8; 32], Vec<PathBuf>> = HashMap::new();
+        for f in files {
+            // unreadable files (permissions, in use) are simply left out
+            match hash_file(&f, Some(64 * 1024), p) {
+                Ok(h) => by_head.entry(h).or_default().push(f),
+                Err(e) if e == CANCELLED => return Err(e),
+                Err(_) => {}
+            }
+        }
+        for same_head in by_head.into_values().filter(|f| f.len() > 1) {
+            let mut by_full: HashMap<[u8; 32], Vec<PathBuf>> = HashMap::new();
+            for f in same_head {
+                match hash_file(&f, None, p) {
+                    Ok(h) => by_full.entry(h).or_default().push(f),
+                    Err(e) if e == CANCELLED => return Err(e),
+                    Err(_) => {}
+                }
+            }
+            for mut same in by_full.into_values().filter(|f| f.len() > 1) {
+                same.sort();
+                groups.push(DupGroup { size, paths: same.iter().map(|x| x.to_string_lossy().into_owned()).collect() });
+            }
+        }
+    }
+    groups.sort_by(|a, b| {
+        let wa = a.size * (a.paths.len() as u64 - 1);
+        let wb = b.size * (b.paths.len() as u64 - 1);
+        wb.cmp(&wa).then_with(|| a.paths.cmp(&b.paths))
+    });
+    Ok(groups)
+}
+
 // ---- zip --------------------------------------------------------------------
 
 /// Adds `path` (a file, or a folder with everything in it) to the archive under `name`.
@@ -813,6 +893,29 @@ mod tests {
         let out2 = extract(&z2).unwrap();
         assert_eq!(read(&Path::new(&out2).join("solo.txt")), "solo");
         assert!(extract(&s(&d.join("solo.txt"))).is_err());
+        fs::remove_dir_all(d).unwrap();
+    }
+    #[test]
+    fn finds_duplicates() {
+        let d = tmp();
+        fs::create_dir(d.join("sub")).unwrap();
+        fs::write(d.join("a.txt"), "same content").unwrap();
+        fs::write(d.join("sub").join("copy.txt"), "same content").unwrap();
+        fs::write(d.join("other.txt"), "same lengtH").unwrap(); // same size, different bytes
+        fs::write(d.join("empty1"), "").unwrap();
+        fs::write(d.join("empty2"), "").unwrap();
+        let big = vec![7u8; 200_000];
+        let mut big2 = big.clone();
+        *big2.last_mut().unwrap() = 8; // differs only after the quick-hash window
+        fs::write(d.join("big1.bin"), &big).unwrap();
+        fs::write(d.join("big2.bin"), &big2).unwrap();
+        fs::write(d.join("big3.bin"), &big).unwrap();
+
+        let g = find_duplicates(&s(&d), &mut NoProgress).unwrap();
+        assert_eq!(g.len(), 2);
+        assert_eq!(g[0].size, 200_000);
+        assert_eq!(g[0].paths, [s(&d.join("big1.bin")), s(&d.join("big3.bin"))]);
+        assert_eq!(g[1].paths, [s(&d.join("a.txt")), s(&d.join("sub").join("copy.txt"))]);
         fs::remove_dir_all(d).unwrap();
     }
 }

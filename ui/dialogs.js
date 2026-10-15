@@ -152,6 +152,54 @@ export function batchRenameDialog(count, plan) {
   });
 }
 
+// ---- duplicate files -----------------------------------------------------------------
+
+/**
+ * Shows groups of identical files ([{ size, paths }]) and lets the user tick the copies to remove.
+ * Every group keeps at least one file. Resolves to the ticked paths, or null if cancelled.
+ */
+export function duplicatesDialog(groups, { root = '' } = {}) {
+  return new Promise((resolve) => {
+    let close = () => {};
+    const finish = (v) => { close(); resolve(v); };
+    const boxes = []; // [{ box, path, size, group }]
+    const summary = el('span', { className: 'muted' }, '');
+    const ok = el('button', { className: 'primary' }, 'Move to Trash');
+    const update = () => {
+      const picked = boxes.filter((b) => b.box.checked);
+      const bytes = picked.reduce((s, b) => s + b.size, 0);
+      summary.textContent = picked.length ? plural(picked.length, 'file') + ' selected · frees ' + fmtSize(bytes) : 'Nothing selected';
+      ok.disabled = !picked.length;
+    };
+    const list = el('div', { className: 'duplist' });
+    groups.forEach((g, gi) => {
+      const members = [];
+      list.append(el('div', { className: 'duphead' }, plural(g.paths.length, 'copy').replace('copys', 'copies') + ' · ' + fmtSize(g.size) + ' each'));
+      g.paths.forEach((path, i) => {
+        const box = el('input', { type: 'checkbox', checked: i > 0 });
+        const rec = { box, path, size: g.size };
+        members.push(rec); boxes.push(rec);
+        box.onchange = () => {
+          // never let the last remaining copy be ticked
+          if (members.every((m) => m.box.checked)) box.checked = false;
+          update();
+        };
+        const shown = root && path.startsWith(root) ? '…' + path.slice(root.length) : path;
+        list.append(el('label', { className: 'duprow', title: path }, box, el('span', {}, shown)));
+      });
+    });
+    ok.onclick = () => finish(boxes.filter((b) => b.box.checked).map((b) => b.path));
+    const wasted = groups.reduce((s, g) => s + g.size * (g.paths.length - 1), 0);
+    const body = el('div', { className: 'dlg wide' },
+      el('h3', {}, plural(groups.length, 'set') + ' of duplicate files'),
+      el('p', { className: 'muted' }, 'Copies could free up ' + fmtSize(wasted) + '. Ticked files go to the Trash; the first copy in each set is kept by default.'),
+      list,
+      el('div', { className: 'btns spread' }, summary, el('span', {}, el('button', { onclick: () => finish(null) }, 'Cancel'), ' ', ok)));
+    close = show(body, { onEscape: () => finish(null) });
+    update(); ok.focus();
+  });
+}
+
 // ---- progress -----------------------------------------------------------------
 
 /**

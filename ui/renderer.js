@@ -1,6 +1,6 @@
 import { iconKey, fmtSize, fmtDate, fmtDateTime, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves, parsePins, planRename } from './format.js';
 import { UndoStack } from './undo.js';
-import { el, conflictDialog, promptDialog, batchRenameDialog, progressDialog, propertiesDialog, multiPropertiesDialog, dialogOpen } from './dialogs.js';
+import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, progressDialog, propertiesDialog, multiPropertiesDialog, dialogOpen } from './dialogs.js';
 
 (() => {
   const api = window.fsapi;
@@ -585,6 +585,25 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, progressDialog, pr
     record({ label: 'Extract ' + z.name, undo: () => api.trash([out]), redo: async () => { out = await api.extractZip(z.path); } });
     await refresh(); state.sel = new Set([out]); paintSel(); toast('Extracted to ' + baseName(out));
   });
+  // Scans `root` for files with identical contents and offers to trash the extra copies.
+  const doFindDuplicates = guard(async (root) => {
+    const opId = api.newOpId();
+    const dlg = progressDialog({ title: 'Looking for duplicate files…', onCancel: () => api.cancelOp(opId), delay: 300 });
+    activeOps.set(opId, dlg);
+    let groups;
+    try {
+      groups = await api.findDuplicates(root, opId);
+    } catch (e) {
+      if (e.message === 'Cancelled') { toast('Cancelled'); return; }
+      throw e;
+    } finally { activeOps.delete(opId); dlg.close(); }
+    if (!groups.length) { toast('No duplicate files found in ' + baseName(root)); return; }
+    const picked = await duplicatesDialog(groups, { root });
+    if (!picked || !picked.length) return;
+    await api.trash(picked);
+    record({ label: 'Delete ' + plural(picked.length, 'duplicate'), undo: () => api.restoreTrashed(picked), redo: () => api.trash(picked) });
+    await refresh(); toast('Moved ' + plural(picked.length, 'duplicate') + ' to the ' + (state.mac ? 'Trash' : 'Recycle Bin'));
+  });
   const doTerminal = guard(async (p) => { await api.openTerminal(p); });
   const doCopyPath = guard(async (paths) => {
     paths = paths || (state.sel.size ? selected().map((e) => e.path) : [state.cwd]);
@@ -735,6 +754,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, progressDialog, pr
       null, ['Cut', () => doCopy(true)], ['Copy', () => doCopy(false)],
       ['Copy path', () => doCopyPath()], ['Copy name', doCopyName], ['Duplicate', doDuplicate], null,
       ['Compress to ZIP', doCompress],
+      ['Find duplicate files here', () => doFindDuplicates(selected()[0].path), oneDir],
       ['Extract to folder', doExtract, one && !selected()[0].isDir && selected()[0].ext === 'zip'], null,
       [one ? 'Rename' : 'Rename…', startRename, state.sel.size > 0], [state.mac ? 'Move to Trash' : 'Delete', doDelete], null,
       ['Properties', doProperties],
@@ -742,6 +762,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, progressDialog, pr
       [state.pins.includes(state.cwd) ? 'Unpin this folder' : 'Pin this folder', () => togglePin(state.cwd)],
       ['Import pins from File Explorer', guard(importPins), isWindows()], null,
       ['New folder', doNewFolder], ['New text file', doNewFile], null,
+      ['Find duplicate files here', () => doFindDuplicates(state.cwd)],
       ['Open in terminal here', () => doTerminal(state.cwd)], ['Copy folder path', () => doCopyPath([state.cwd])], null,
       ['Paste', doPaste], ['Refresh', refresh], null,
       ['Properties', doProperties],
