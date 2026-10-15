@@ -519,7 +519,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     const raw = ev.dataTransfer.getData('text/x-explorerx'); if (!raw) return;
     const paths = JSON.parse(raw);
     await transfer(ev.ctrlKey || ev.altKey ? 'copy' : 'move', paths, dest);
-    await refresh();
+    await refresh(); await p2refresh();
   }
 
   function updateStatus() {
@@ -751,6 +751,8 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
       ['Open in new window', () => api.newWindow(selected()[0].path), oneDir],
       [state.mac ? 'Reveal in Finder' : 'Show in Explorer', () => api.reveal(selected()[0].path), one],
       ['Open in terminal', () => doTerminal(selected()[0].path), one],
+      ['Copy to other pane', () => sendToPane2('copy'), pane2.open],
+      ['Move to other pane', () => sendToPane2('move'), pane2.open],
       null, ['Cut', () => doCopy(true)], ['Copy', () => doCopy(false)],
       ['Copy path', () => doCopyPath()], ['Copy name', doCopyName], ['Duplicate', doDuplicate], null,
       ['Compress to ZIP', doCompress],
@@ -788,7 +790,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
   $('newFolder').onclick = doNewFolder; $('cut').onclick = () => doCopy(true); $('copy').onclick = () => doCopy(false);
   $('paste').onclick = doPaste; $('renameBtn').onclick = startRename; $('delete').onclick = doDelete;
   $('sort').onchange = (e) => { state.sortKey = e.target.value; state.sortDir = 1; savePrefs(); render(); };
-  $('hidden').onclick = () => { state.showHidden = !state.showHidden; $('hidden').classList.toggle('on', state.showHidden); savePrefs(); refresh(); };
+  $('hidden').onclick = () => { state.showHidden = !state.showHidden; $('hidden').classList.toggle('on', state.showHidden); savePrefs(); refresh(); p2refresh(); };
   $('previewBtn').onclick = togglePreview;
   $('view').onclick = () => { state.view = state.view === 'details' ? 'icons' : 'details'; $('view').textContent = 'View: ' + (state.view === 'details' ? 'Details' : 'Icons'); savePrefs(); render(); };
 
@@ -848,6 +850,131 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     ev.preventDefault(); setIcon(state.icon + (ev.deltaY < 0 ? 8 : -8));
   }, { passive: false });
 
+  // ---- second pane (split view) ---------------------------------------------
+  // A second folder next to the main one. It has its own folder and selection; files move between
+  // the panes by dragging, or with "Copy to / Move to other pane" in the right-click menus.
+  const pane2 = { open: false, cwd: null, entries: [], sel: new Set(), anchor: null };
+  let p2shown = [];
+  const p2selected = () => p2shown.filter((e) => pane2.sel.has(e.path));
+
+  async function p2go(dir) {
+    try { pane2.entries = await api.list(dir, state.showHidden); }
+    catch (e) { toast('Cannot open ' + dir + ': ' + e.message); return; }
+    pane2.cwd = dir; pane2.sel.clear(); pane2.anchor = null;
+    renderPane2();
+  }
+  const p2refresh = () => (pane2.open && pane2.cwd ? p2go(pane2.cwd) : null);
+
+  function renderPane2() {
+    $('p2addr').value = pane2.cwd || '';
+    $('p2up').disabled = !pane2.cwd || !parentOf(pane2.cwd) || parentOf(pane2.cwd) === pane2.cwd;
+    const host = $('p2list'); host.textContent = '';
+    p2shown = [...pane2.entries].sort((a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })));
+    for (const e of p2shown) host.appendChild(makeP2Item(e));
+    if (!p2shown.length) host.appendChild(el('div', { className: 'empty' }, 'This folder is empty.'));
+  }
+  const paintP2 = () => document.querySelectorAll('#p2list [data-p2]').forEach((n) => n.classList.toggle('sel', pane2.sel.has(n.dataset.p2)));
+
+  function p2Select(e, ev) {
+    const mod = state.mac ? ev.metaKey : ev.ctrlKey;
+    if (ev.shiftKey && pane2.anchor) {
+      const a = p2shown.findIndex((x) => x.path === pane2.anchor), b = p2shown.findIndex((x) => x.path === e.path);
+      pane2.sel = new Set(p2shown.slice(Math.min(a, b), Math.max(a, b) + 1).map((x) => x.path));
+    } else if (mod) {
+      pane2.sel.has(e.path) ? pane2.sel.delete(e.path) : pane2.sel.add(e.path); pane2.anchor = e.path;
+    } else { pane2.sel = new Set([e.path]); pane2.anchor = e.path; }
+    paintP2();
+  }
+
+  function makeP2Item(e) {
+    const row = el('div', { className: 'row item' + (pane2.sel.has(e.path) ? ' sel' : ''), draggable: true, dataset: { p2: e.path } },
+      el('span', { className: 'nameCell' }, el('span', { className: 'ic' }, icon(e)), el('span', { className: 'nm' }, e.name)),
+      el('span', { className: 'num' }, e.isDir ? '' : fmtSize(e.size)));
+    row.onclick = (ev) => p2Select(e, ev);
+    row.ondblclick = guard(() => (e.isDir ? p2go(e.path) : api.open(e.path)));
+    row.oncontextmenu = (ev) => {
+      ev.preventDefault(); ev.stopPropagation();
+      if (!pane2.sel.has(e.path)) { pane2.sel = new Set([e.path]); pane2.anchor = e.path; paintP2(); }
+      const one = pane2.sel.size === 1;
+      showCustomMenu(ev.clientX, ev.clientY, [
+        ['Open', guard(() => (e.isDir ? p2go(e.path) : api.open(e.path))), one],
+        ['Open in main pane', () => go(e.isDir ? e.path : parentOf(e.path)), one],
+        null,
+        ['Copy to main pane', guard(() => p2Send('copy')), true],
+        ['Move to main pane', guard(() => p2Send('move')), true],
+        null,
+        [state.mac ? 'Move to Trash' : 'Delete', guard(p2Delete)],
+      ]);
+    };
+    row.ondragstart = (ev) => {
+      if (!pane2.sel.has(e.path)) { pane2.sel = new Set([e.path]); pane2.anchor = e.path; paintP2(); }
+      ev.dataTransfer.setData('text/x-explorerx', JSON.stringify([...pane2.sel])); ev.dataTransfer.effectAllowed = 'copyMove';
+    };
+    if (e.isDir) {
+      row.ondragover = (ev) => { ev.preventDefault(); row.classList.add('drop'); };
+      row.ondragleave = () => row.classList.remove('drop');
+      row.ondrop = guard(async (ev) => { ev.preventDefault(); ev.stopPropagation(); row.classList.remove('drop'); await dropOnto(e.path, ev); });
+    }
+    return row;
+  }
+
+  // Copies / moves the second pane's selection into the main pane's folder.
+  async function p2Send(kind) {
+    const paths = p2selected().map((e) => e.path); if (!paths.length) return;
+    await transfer(kind, paths, state.cwd);
+    await refresh(); await p2refresh();
+  }
+  // ...and the main pane's selection into the second pane's folder.
+  const sendToPane2 = guard(async (kind) => {
+    const paths = selected().map((e) => e.path); if (!paths.length || !pane2.cwd) return;
+    await transfer(kind, paths, pane2.cwd);
+    await refresh(); await p2refresh();
+  });
+  async function p2Delete() {
+    const paths = p2selected().map((e) => e.path); if (!paths.length) return;
+    await api.trash(paths);
+    record({ label: 'Delete ' + plural(paths.length, 'item'), undo: () => api.restoreTrashed(paths), redo: () => api.trash(paths) });
+    await p2refresh();
+  }
+
+  async function toggleSplit() {
+    pane2.open = !pane2.open;
+    $('pane2').hidden = !pane2.open; $('splitBtn').classList.toggle('on', pane2.open);
+    if (pane2.open) await p2go(pane2.cwd || state.cwd);
+  }
+  $('splitBtn').onclick = toggleSplit;
+  $('p2close').onclick = toggleSplit;
+  $('p2up').onclick = () => { const p = parentOf(pane2.cwd); if (p && p !== pane2.cwd) p2go(p); };
+  $('p2addr').onkeydown = guard(async (ev) => {
+    ev.stopPropagation();
+    if (ev.key === 'Escape') { $('p2addr').value = pane2.cwd; $('p2addr').blur(); }
+    if (ev.key === 'Enter') {
+      const p = $('p2addr').value.trim().replace(/^~(?=$|[\\/])/, await api.home());
+      if (await api.isDir(p)) { await p2go(p); $('p2addr').blur(); } else toast('Not a folder: ' + p);
+    }
+  });
+  $('p2list').onclick = (ev) => { if (ev.target === $('p2list')) { pane2.sel.clear(); paintP2(); } };
+  $('p2list').ondragover = (ev) => ev.preventDefault();
+  $('p2list').ondrop = guard(async (ev) => { ev.preventDefault(); await dropOnto(pane2.cwd, ev); });
+  $('p2list').oncontextmenu = (ev) => {
+    ev.preventDefault(); pane2.sel.clear(); paintP2();
+    showCustomMenu(ev.clientX, ev.clientY, [
+      ['New folder', guard(async () => {
+        const p = await api.mkdir(pane2.cwd);
+        record({ label: 'New folder', undo: () => api.trash([p]), redo: () => api.createPath(p, true) });
+        await p2refresh();
+      })],
+      ['Paste', guard(async () => {
+        const c = await api.clipboardRead(); if (!c || !c.paths.length) return;
+        const done = await transfer(c.cut ? 'move' : 'copy', c.paths, pane2.cwd);
+        if (c.cut && done.length) await api.clipboardWrite([], false);
+        state.cut = new Set(); await refresh(); await p2refresh();
+      })],
+      ['Refresh', p2refresh],
+      ['Open this folder in the main pane', () => go(pane2.cwd)],
+    ]);
+  };
+
   // ---- keyboard ---------------------------------------------------------
   let typed = '', typedTimer = 0;
   document.addEventListener('keydown', (ev) => {
@@ -878,7 +1005,8 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     else if (mod && k === 'h') { $('hidden').click(); ev.preventDefault(); }
     else if (mod && ev.shiftKey && k === 'n') doNewFolder();
     else if (ev.key === 'F2') startRename();
-    else if (ev.key === 'F5') refresh();
+    else if (ev.key === 'F5') { refresh(); p2refresh(); }
+    else if (mod && ev.key === '\\') { ev.preventDefault(); toggleSplit(); }
     else if (ev.key === 'Delete' || (state.mac && ev.metaKey && ev.key === 'Backspace')) doDelete();
     else if (ev.key === 'Enter' || (state.mac && ev.metaKey && ev.key === 'ArrowDown')) { const s = selected(); if (s.length === 1) guard(openEntry)(s[0]); }
     else if (ev.key === 'Backspace' || (ev.altKey && ev.key === 'ArrowUp') || (state.mac && ev.metaKey && ev.key === 'ArrowUp')) up();

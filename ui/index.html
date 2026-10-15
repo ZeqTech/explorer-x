@@ -31,6 +31,7 @@
     <option value="ext">Sort: Type</option><option value="size">Sort: Size</option>
   </select>
   <input id="zoom" type="range" min="32" max="128" value="64" title="Icon size (Ctrl+scroll)">
+  <button id="splitBtn" title="Split view (Ctrl+\)">Split</button>
   <button id="previewBtn" title="Preview pane (Alt+P)">Preview</button>
   <button id="hidden"title="Show hidden items (Ctrl+H)">Hidden</button>
   <button id="view" title="Toggle view">View: Details</button>
@@ -39,6 +40,14 @@
   <aside id="nav"></aside>
   <div id="resizer" title="Drag to resize (double-click to reset)"></div>
   <section id="files" tabindex="0"></section>
+  <section id="pane2" hidden>
+    <div class="p2bar">
+      <button id="p2up" title="Up">&#8593;</button>
+      <input id="p2addr" spellcheck="false" title="Folder shown in the second pane">
+      <button id="p2close" title="Close split view (Ctrl+\)">&times;</button>
+    </div>
+    <div id="p2list"></div>
+  </section>
   <aside id="preview" hidden></aside>
 </main>
 <footer id="status"><span id="count"></span><span id="selinfo"></span></footer>
