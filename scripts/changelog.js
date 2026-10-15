@@ -1,10 +1,12 @@
 // Builds a changelog section ("## 0.2.0 - 2026-10-15", then ### Added / Changed / Fixed ...) from the git
 // commits between two releases.
-//   node scripts/changelog.js                      commits since the latest v* tag, printed (and saved to
-//                                                  CHANGELOG.md if that file does not exist yet)
+//   node scripts/changelog.js                      preview the commits since the latest v* tag (nothing is saved)
 //   node scripts/changelog.js --version 0.2.0      title the section "0.2.0" instead of "Unreleased"
 //   node scripts/changelog.js --from v0.1.1 --to v0.1.2
-//   node scripts/changelog.js --write              also put the section at the top of CHANGELOG.md (older versions stay below it)
+//   node scripts/changelog.js --version 0.2.0 --write
+//                                                  save it at the top of CHANGELOG.md, creating the file if needed
+//                                                  (older versions stay below it). A version is required, so the
+//                                                  file never contains an "Unreleased" section; `./make.sh bump` does this.
 //
 // Commits are sorted into Added / Changed / Fixed / Removed by their first word ("Add...", "Fix...",
 // "Remove...") or by a conventional-commit prefix ("feat:", "fix:"); everything else is "Changed".
@@ -83,8 +85,8 @@ console.log(section);
 // ---- CHANGELOG.md -------------------------------------------------------------------------
 const file = path.join(root, 'CHANGELOG.md');
 const existed = fs.existsSync(file);
-// --write always saves; otherwise the file is created when it does not exist yet (never overwritten).
-if (args.includes('--write') || (!existed && !opt('from') && !opt('to'))) {
+if (args.includes('--write')) {
+  if (!opt('version')) { console.error('--write needs --version X.Y.Z (use ./make.sh bump to bump and write in one step)'); process.exit(1); }
   const text = existed ? fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n') : '# Changelog\n\n';
 
   // everything before the first "## " heading stays as the file's intro; each "## " block is a release
@@ -92,8 +94,7 @@ if (args.includes('--write') || (!existed && !opt('from') && !opt('to'))) {
   const head = first < 0 ? text : text.slice(0, first);
   const nameOf = (s) => s.match(/^## (\S+)/)[1];
   const kept = (first < 0 ? '' : text.slice(first)).split(/^(?=## )/m).filter(Boolean)
-    .filter((s) => nameOf(s) !== version)                         // re-running for a version replaces its section
-    .filter((s) => version === 'Unreleased' || nameOf(s) !== 'Unreleased'); // a real version replaces the unreleased notes
+    .filter((s) => nameOf(s) !== version); // re-running for a version replaces its section
 
   // the new section goes at the top, right under the intro
   const all = [section, ...kept].map((s) => s.replace(/\n+$/, '\n'));

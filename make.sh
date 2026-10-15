@@ -5,9 +5,9 @@
 #   ./make.sh mac                 macOS .dmg (x64 + arm64)           (must run on a Mac)
 #   ./make.sh all                 win, plus mac when running on a Mac
 #   ./make.sh [target] --bump L   bump the version first (L = patch | minor | major | X.Y.Z), then build
-#   ./make.sh bump L              bump the version and write its changelog to CHANGELOG.md, no build
-#   ./make.sh changelog [opts]    print the commits since the last release tag; creates CHANGELOG.md
-#                                 if it is missing
+#   ./make.sh bump L              bump the version and add its notes to the top of CHANGELOG.md
+#                                 (created if missing), no build
+#   ./make.sh changelog [opts]    preview the commits since the last release tag (saves nothing)
 #                                 (opts: --version X.Y.Z, --from TAG, --to REF, --write)
 cd "$(dirname "${BASH_SOURCE[0]:-$0}")" || exit 1
 
@@ -18,7 +18,7 @@ SHELL_BIN="${BASH:-sh}"
 # Skip tests for local builds by default; run `SKIP_TESTS=0 ./make.sh` to include them.
 export SKIP_TESTS="${SKIP_TESTS:-1}"
 
-usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0" >&2; exit 2; }
 
 # Sets the version everywhere (package.json, Cargo.toml, tauri.conf.json) and records the commits
 # since the last tag in CHANGELOG.md. Nothing is committed or tagged; see docs/RELEASING.md.
