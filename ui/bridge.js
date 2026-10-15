@@ -29,6 +29,7 @@
     newFile: (dir) => call('new_file', { dir }),
     search: (root, query) => call('search', { root, query }),
     drives: () => call('drives'),
+    diskSpace: (path) => call('disk_space', { path }),
     quickAccess: () => call('quick_access'),
     findDuplicates: (root, opId) => call('find_duplicates', { opId, root }),
     compress: (paths) => call('compress_paths', { paths }),

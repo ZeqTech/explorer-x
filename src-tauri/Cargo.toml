@@ -26,6 +26,7 @@ png = "0.18"
 base64 = "0.22"
 zip = { version = "9.0.3", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
+fs4 = "1.1.0"
 
 # Release: thin LTO + parallel codegen builds ~40% faster than full LTO (92s vs 152s clean in
 # our measurements) for an executable about 15% larger. Set CARGO_PROFILE_RELEASE_LTO=true and

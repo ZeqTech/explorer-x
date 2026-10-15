@@ -661,6 +661,17 @@ pub fn text_preview(path: &str, max_bytes: usize) -> Res<Option<String>> {
 
 // ---- places ---------------------------------------------------------------
 
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct DiskSpace {
+    pub free: u64,
+    pub total: u64,
+}
+
+/// Free and total space of the volume that holds `path` (free = what a normal user can still use).
+pub fn disk_space(path: &str) -> Res<DiskSpace> {
+    Ok(DiskSpace { free: fs4::available_space(path).map_err(err)?, total: fs4::total_space(path).map_err(err)? })
+}
+
 pub fn drives() -> Vec<Place> {
     let os = std::env::consts::OS;
     if os == "windows" {
@@ -873,6 +884,14 @@ mod tests {
         assert_eq!(text_preview(&s(&d.join("bin.dat")), 1024).unwrap(), None);
         fs::remove_dir_all(d).unwrap();
     }
+    #[test]
+    fn disk_space_of_a_folder() {
+        let d = tmp();
+        let sp = disk_space(&s(&d)).unwrap();
+        assert!(sp.total > 0 && sp.free <= sp.total);
+        fs::remove_dir_all(d).unwrap();
+    }
+
     #[test]
     fn zip_round_trip() {
         let d = tmp();

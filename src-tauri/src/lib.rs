@@ -1,6 +1,6 @@
 mod fs_service;
 
-use fs_service::{Conflict, DirStats, DupGroup, Entry, Hit, Moved, Place, Progress, Props, Res, Resolutions, CANCELLED};
+use fs_service::{Conflict, DirStats, DiskSpace, DupGroup, Entry, Hit, Moved, Place, Progress, Props, Res, Resolutions, CANCELLED};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -189,6 +189,10 @@ async fn new_file(dir: String) -> Res<String> {
 #[tauri::command]
 async fn search(root: String, query: String) -> Res<Vec<Hit>> {
     blocking(move || Ok(fs_service::search(&root, &query, 500))).await
+}
+#[tauri::command]
+async fn disk_space(path: String) -> Res<DiskSpace> {
+    blocking(move || fs_service::disk_space(&path)).await
 }
 #[tauri::command]
 async fn drives() -> Res<Vec<Place>> {
@@ -433,7 +437,7 @@ pub fn run() {
             list_dir, copy_into, move_into, rename_path, make_dir, new_file, search, drives, quick_access,
             trash_paths, open_path, reveal_path, is_dir, home_dir, platform, new_window, clipboard_write,
             clipboard_read, clipboard_text, open_terminal, cancel_op, find_conflicts, rename_many, create_path,
-            properties, dir_stats, text_preview, restore_trashed, file_icon, import_explorer_pins, compress_paths, extract_zip, find_duplicates
+            properties, dir_stats, text_preview, restore_trashed, file_icon, import_explorer_pins, compress_paths, extract_zip, find_duplicates, disk_space
         ])
         .build(tauri::generate_context!())
         .expect("error while building Explorer X");

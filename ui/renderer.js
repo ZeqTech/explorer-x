@@ -206,7 +206,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
       if (addRecent(dir)) renderNav(false);
     }
     document.title = dir.split(/[\\/]/).filter(Boolean).pop() || dir;
-    render(); renderCrumbs(); renderNavActive(); syncTab();
+    render(); renderCrumbs(); renderNavActive(); syncTab(); updateSpace();
   }
   const refresh = () => go(state.cwd, false);
   const back = () => { if (state.hi > 0) go(state.history[--state.hi], false); };
@@ -589,7 +589,35 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     const n = state.sel.size;
     if (!n) { $('selinfo').textContent = ''; return; }
     const bytes = shown.filter((e) => state.sel.has(e.path) && !e.isDir).reduce((s, e) => s + e.size, 0);
-    $('selinfo').textContent = n + ' selected' + (bytes ? ' · ' + fmtSize(bytes) : '');
+    let text = n + ' selected' + (bytes ? ' · ' + fmtSize(bytes) : '');
+    // one folder selected: show how big it is (worked out in the background and cached)
+    const only = n === 1 ? shown.find((e) => state.sel.has(e.path)) : null;
+    if (only && only.isDir) {
+      if (dirSizes.has(only.path)) text += ' · ' + fmtSize(dirSizes.get(only.path));
+      else { text += ' · calculating size…'; queueFolderSize(only); }
+    }
+    $('selinfo').textContent = text;
+  }
+
+  let folderSizeTimer = 0;
+  function queueFolderSize(e) {
+    clearTimeout(folderSizeTimer);
+    folderSizeTimer = setTimeout(async () => {
+      const stats = await api.dirStats(e.path).catch(() => null);
+      dirSizes.set(e.path, stats ? stats.size : 0);
+      // only redraw if the message is still the one waiting for this size
+      if (state.sel.size === 1 && state.sel.has(e.path) && $('selinfo').textContent.endsWith('calculating size…')) updateStatus();
+    }, 250);
+  }
+
+  // free space on the drive that holds the current folder
+  let spaceToken = 0;
+  async function updateSpace() {
+    const t = ++spaceToken;
+    try {
+      const d = await api.diskSpace(state.cwd);
+      if (t === spaceToken) $('space').textContent = fmtSize(d.free) + ' free of ' + fmtSize(d.total);
+    } catch { if (t === spaceToken) $('space').textContent = ''; }
   }
 
   function paintSel() {
