@@ -115,6 +115,9 @@ body.resizing { cursor: col-resize; }
 .rrow .arrow { color: var(--muted); text-align: center; }
 .dlg button:disabled { opacity: .5; }
 .duplist { max-height: 360px; overflow: auto; margin-top: 10px; border: 1px solid var(--line); border-radius: 4px; }
+.duplist.short { max-height: 220px; margin-top: 4px; }
+.duprow b { flex: none; font-weight: 600; }
+.duprow .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .duphead { position: sticky; top: 0; padding: 4px 8px; background: var(--bar); color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); }
 .duprow { display: flex; align-items: center; gap: 8px; padding: 3px 8px; cursor: pointer; }
 .duprow:hover { background: var(--hover); }

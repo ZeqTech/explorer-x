@@ -109,6 +109,35 @@ export function promptDialog({ title, label, value = '', okText = 'OK', multilin
   });
 }
 
+// ---- choose a folder -----------------------------------------------------------------
+
+/**
+ * Asks for a destination folder: type a path or click one of the `suggestions` ([{ label, path }]).
+ * Resolves to the path as typed (the caller checks that it exists), or null if cancelled.
+ */
+export function chooseFolderDialog({ title, label, suggestions = [], okText = 'OK' }) {
+  return new Promise((resolve) => {
+    let close = () => {};
+    const finish = (v) => { close(); resolve(v); };
+    const seen = new Set();
+    const unique = suggestions.filter((s) => s.path && !seen.has(s.path) && seen.add(s.path));
+    const input = el('input', { className: 'field', type: 'text', placeholder: 'Type a folder path, or pick one below', spellcheck: false });
+    const error = el('p', { className: 'error' }, '');
+    const ok = el('button', { className: 'primary', onclick: () => { if (input.value.trim()) finish(input.value.trim()); else error.textContent = 'Choose a folder first.'; } }, okText);
+    input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); ok.click(); } };
+    const list = el('div', { className: 'duplist short' }, unique.map((s) => el('div', {
+      className: 'duprow', title: s.path,
+      onclick: () => { input.value = s.path; error.textContent = ''; input.focus(); },
+      ondblclick: () => finish(s.path),
+    }, el('b', {}, s.label), el('span', { className: 'muted' }, s.path))));
+    const body = el('div', { className: 'dlg wide' },
+      el('h3', {}, title), label ? el('p', { className: 'muted' }, label) : null, input, error, unique.length ? list : null,
+      el('div', { className: 'btns' }, el('button', { onclick: () => finish(null) }, 'Cancel'), ok));
+    close = show(body, { onEscape: () => finish(null) });
+    input.focus();
+  });
+}
+
 // ---- batch rename -----------------------------------------------------------------
 
 /**

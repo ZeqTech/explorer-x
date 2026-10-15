@@ -1,6 +1,6 @@
 import { iconKey, fmtSize, fmtDate, fmtDateTime, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves, parsePins, planRename, matchesFilter, NO_FILTER, filterActive } from './format.js';
 import { UndoStack } from './undo.js';
-import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, progressDialog, propertiesDialog, multiPropertiesDialog, dialogOpen } from './dialogs.js';
+import { el, conflictDialog, promptDialog, chooseFolderDialog, batchRenameDialog, duplicatesDialog, progressDialog, propertiesDialog, multiPropertiesDialog, dialogOpen } from './dialogs.js';
 
 (() => {
   const api = window.fsapi;
@@ -209,7 +209,8 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     document.title = dir.split(/[\\/]/).filter(Boolean).pop() || dir;
     render(); renderCrumbs(); renderNavActive(); syncTab(); updateSpace();
   }
-  const refresh = () => go(state.cwd, false);
+  // After an operation, re-run the search (instead of dropping back to the folder) so results stay put.
+  const refresh = () => (state.searchMode && $('search').value.trim() ? runSearch(state.searchRoot || state.cwd, $('search').value.trim()) : go(state.cwd, false));
   const back = () => { if (state.hi > 0) go(state.history[--state.hi], false); };
   const fwd = () => { if (state.hi < state.history.length - 1) go(state.history[++state.hi], false); };
   const up = () => { const p = parentOf(state.cwd); if (p && p !== state.cwd) go(p); };
@@ -676,7 +677,8 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     let out = await make();
     if (!out) { toast('Cancelled'); return; }
     record({ label: 'Compress ' + plural(paths.length, 'item'), undo: () => api.trash([out]), redo: async () => { out = await make(); } });
-    await refresh(); state.sel = new Set([out]); paintSel(); toast('Created ' + baseName(out));
+    await refresh(); state.sel = new Set([out]); paintSel();
+    toast('Created ' + baseName(out) + (state.searchMode ? ' in ' + baseName(parentOf(out)) : ''));
   });
   const doExtract = guard(async () => {
     const z = selected()[0]; if (!z) return;
@@ -685,6 +687,29 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     if (!out) { toast('Cancelled'); return; }
     record({ label: 'Extract ' + z.name, undo: () => api.trash([out]), redo: async () => { out = await run(); } });
     await refresh(); state.sel = new Set([out]); paintSel(); toast('Extracted to ' + baseName(out));
+  });
+  // Copy or move the selection to a folder chosen in a dialog (handy for search results, which have no folder to paste into).
+  const doCopyMoveTo = guard(async (kind) => {
+    const paths = selected().map((e) => e.path); if (!paths.length) return;
+    const suggestions = [
+      ...(pane2.open && pane2.cwd ? [{ label: 'Second pane', path: pane2.cwd }] : []),
+      { label: 'This folder', path: state.cwd },
+      ...state.pins.map((p) => ({ label: pinLabel(p), path: p })),
+      ...state.recent.filter((p) => !state.pins.includes(p)).slice(0, 6).map((p) => ({ label: baseName(p), path: p })),
+    ];
+    const typed = await chooseFolderDialog({ title: (kind === 'copy' ? 'Copy ' : 'Move ') + plural(paths.length, 'item') + ' to\u2026', suggestions, okText: kind === 'copy' ? 'Copy' : 'Move' });
+    if (!typed) return;
+    const dest = typed.replace(/^~(?=$|[\\/])/, await api.home());
+    if (!(await api.isDir(dest).catch(() => false))) { toast('Not a folder: ' + dest); return; }
+    await transfer(kind, paths, dest);
+    await refresh(); await p2refresh();
+  });
+  // Jump from a search result to the folder that holds it, with the item selected.
+  const doShowInFolder = guard(async () => {
+    const e = selected()[0]; if (!e) return;
+    await go(parentOf(e.path));
+    state.sel = new Set([e.path]); state.anchor = e.path; paintSel();
+    const row = document.querySelector('[data-path="' + CSS.escape(e.path) + '"]'); if (row) row.scrollIntoView({ block: 'center' });
   });
   // "Open with...": Windows shows its own app picker; elsewhere we ask which application to use.
   const doOpenWith = guard(async () => {
@@ -755,7 +780,10 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
   const batchRename = guard(async () => {
     const s = selected(); if (s.length < 2) return;
     const dir = parentOf(s[0].path);
-    const others = state.entries.filter((e) => !state.sel.has(e.path)).map((e) => e.name);
+    if (s.some((e) => parentOf(e.path) !== dir)) { toast('Select items from one folder to rename them together'); return; }
+    // in search results the list is not the folder, so read the folder to find names already taken
+    const siblings = state.searchMode ? await api.list(dir, true) : state.entries;
+    const others = siblings.filter((e) => !state.sel.has(e.path)).map((e) => e.name);
     const plan = await batchRenameDialog(s.length, (opts) => planRename(s, { ...opts, others }));
     if (!plan) return;
     const byName = new Map(s.map((e) => [e.name, e]));
@@ -857,6 +885,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     const oneDir = one && selected()[0].isDir, pinned = oneDir && state.pins.includes(selected()[0].path);
     const items = custom || (onItem ? [
       ['Open', () => one && openEntry(selected()[0]), one],
+      ['Open containing folder', doShowInFolder, state.searchMode && one],
       [pinned ? 'Unpin from sidebar' : 'Pin to sidebar', () => togglePin(selected()[0].path), oneDir],
       ['Open in new tab', () => newTab(selected()[0].path, false), oneDir],
       ['Open in new window', () => api.newWindow(selected()[0].path), oneDir],
@@ -866,7 +895,8 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
       ['Copy to other pane', () => sendToPane2('copy'), pane2.open],
       ['Move to other pane', () => sendToPane2('move'), pane2.open],
       null, ['Cut', () => doCopy(true)], ['Copy', () => doCopy(false)],
-      ['Copy path', () => doCopyPath()], ['Copy name', doCopyName], ['Duplicate', doDuplicate], null,
+      ['Copy path', () => doCopyPath()], ['Copy name', doCopyName], ['Duplicate', doDuplicate],
+      ['Copy to\u2026', () => doCopyMoveTo('copy')], ['Move to\u2026', () => doCopyMoveTo('move')], null,
       ['Compress to ZIP', doCompress],
       ['Find duplicate files here', () => doFindDuplicates(selected()[0].path), oneDir],
       ['Extract to folder', doExtract, one && !selected()[0].isDir && selected()[0].ext === 'zip'], null,
