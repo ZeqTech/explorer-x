@@ -14,6 +14,7 @@ The **Added** column holds a release version, or a date for work not released ye
 | Breadcrumb dropdowns | Click the `›` between folders in the address bar to list the folders at that level and jump to one | 2026-10-15 |
 | Back, forward, up | Toolbar buttons, `Alt+Left`, `Alt+Right`, `Alt+Up`, `Backspace` | initial |
 | Tabs | `Ctrl+T` new tab, `Ctrl+W` close, `Ctrl+Tab` cycle, middle-click a folder to open it in a new tab | initial |
+| Remembers tabs and split view | Open tabs, the active tab and the split pane come back when you start the app again | 2026-10-15 |
 | Details and icon views | The **View** button; the slider or `Ctrl+scroll` changes icon size | initial |
 | Sorting | Click a column header or use the **Sort** menu | initial |
 | Native file icons and image thumbnails | Automatic | initial |

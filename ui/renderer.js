@@ -120,7 +120,37 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
   // Each tab has its own folder and back/forward history; sort, view and pins are shared.
   const tabs = [{ cwd: null, history: [], hi: -1 }];
   let activeTab = 0;
-  const syncTab = () => { Object.assign(tabs[activeTab], { cwd: state.cwd, history: state.history, hi: state.hi }); renderTabs(); };
+  const syncTab = () => { Object.assign(tabs[activeTab], { cwd: state.cwd, history: state.history, hi: state.hi }); renderTabs(); saveSession(); };
+
+  // The open tabs and the split pane come back on the next launch. Only a window that was opened
+  // without a folder saves them, so "Open in new window" windows do not overwrite the main session.
+  let sessionOn = false;
+  function saveSession() {
+    if (!sessionOn) return;
+    try {
+      localStorage.setItem('explorerx-session', JSON.stringify({
+        tabs: tabs.map((t) => t.cwd), active: activeTab, pane2: { open: pane2.open, cwd: pane2.cwd },
+      }));
+    } catch { /* ignore */ }
+  }
+  const loadSession = () => { try { return JSON.parse(localStorage.getItem('explorerx-session') || 'null'); } catch { return null; } };
+  // Brings back the saved tabs (dropping folders that no longer exist) and the split pane.
+  async function restoreSession(saved) {
+    if (!saved || !Array.isArray(saved.tabs)) return false;
+    const keep = [];
+    for (let i = 0; i < saved.tabs.length; i++) {
+      const p = saved.tabs[i];
+      if (typeof p === 'string' && await api.isDir(p).catch(() => false)) keep.push({ i, p });
+    }
+    if (!keep.length) return false;
+    tabs.length = 0;
+    for (const { p } of keep) tabs.push({ cwd: p, history: [p], hi: 0 });
+    const at = keep.findIndex((k) => k.i >= saved.active);
+    await loadTab(at < 0 ? keep.length - 1 : at);
+    const p2 = saved.pane2;
+    if (p2 && p2.open && typeof p2.cwd === 'string' && await api.isDir(p2.cwd).catch(() => false)) { pane2.cwd = p2.cwd; await toggleSplit(); }
+    return true;
+  }
 
   function renderTabs() {
     const bar = $('tabs'); bar.textContent = '';
@@ -159,8 +189,8 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     if (tabs.length === 1) return;
     syncTab();
     tabs.splice(i, 1);
-    if (i < activeTab) { activeTab--; renderTabs(); return; }
-    if (i === activeTab) await loadTab(Math.min(i, tabs.length - 1)); else renderTabs();
+    if (i < activeTab) { activeTab--; renderTabs(); saveSession(); return; }
+    if (i === activeTab) await loadTab(Math.min(i, tabs.length - 1)); else { renderTabs(); saveSession(); }
   }
   const cycleTab = (d) => switchTab((activeTab + d + tabs.length) % tabs.length);
 
@@ -891,7 +921,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     try { pane2.entries = await api.list(dir, state.showHidden); }
     catch (e) { toast('Cannot open ' + dir + ': ' + e.message); return; }
     pane2.cwd = dir; pane2.sel.clear(); pane2.anchor = null;
-    renderPane2();
+    renderPane2(); saveSession();
   }
   const p2refresh = () => (pane2.open && pane2.cwd ? p2go(pane2.cwd) : null);
 
@@ -970,7 +1000,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
   async function toggleSplit() {
     pane2.open = !pane2.open;
     $('pane2').hidden = !pane2.open; $('splitBtn').classList.toggle('on', pane2.open);
-    if (pane2.open) await p2go(pane2.cwd || state.cwd);
+    if (pane2.open) await p2go(pane2.cwd || state.cwd); else saveSession();
   }
   $('splitBtn').onclick = toggleSplit;
   $('p2close').onclick = toggleSplit;
@@ -1064,7 +1094,9 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     $('view').textContent = 'View: ' + (state.view === 'details' ? 'Details' : 'Icons');
     updateUndoUi();
     await renderNav();
-    await go(api.startPath() || await api.home());
+    const primary = !api.startPath();
+    if (!(primary && await restoreSession(loadSession()))) await go(api.startPath() || await api.home());
+    sessionOn = primary; saveSession();
     api.onOpenPath((p) => go(p));
   })();
 })();
