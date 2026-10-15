@@ -8,7 +8,9 @@ secrets; follow the steps below with your own keys.
 
 0. Optional: `./make.sh bump patch` (or `minor`, `major`, or an exact `0.3.0`) sets the version in
    `package.json`, `Cargo.toml`, `tauri.conf.json` and the lockfile, and writes the commits since the
-   last release tag to `CHANGELOG.md`. It commits nothing, so review and commit the result.
+   last release tag to `CHANGELOG.md`, sorted into Added / Changed / Fixed / Removed by their prefixes
+   (see "Commit messages" in [CONTRIBUTING.md](../CONTRIBUTING.md)). It commits nothing, so review and
+   commit the result.
    `./make.sh changelog` just prints the notes, and `./make.sh win --bump patch` bumps and builds.
 
 1. Commit and push everything you want in the release to `main`, and wait for the **Build**

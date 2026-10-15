@@ -41,24 +41,37 @@ try {
 
 // ---- commits -> groups ---------------------------------------------------------------------
 const ORDER = ['Added', 'Changed', 'Deprecated', 'Removed', 'Fixed', 'Security'];
-const CONVENTIONAL = /^(feat|fix|docs|chore|refactor|perf|test|style|build|ci)(\([^)]*\))?!?:\s*/i;
+// A commit prefix ("feat:", "fix(ui):") picks the changelog section; see "Commit messages" in
+// CONTRIBUTING.md. Prefixes in HIDDEN keep a commit out of the changelog. Commits with no prefix
+// are sorted by their first word instead ("Add...", "Fix...", "Remove...") and default to Changed.
+const TYPES = {
+  feat: 'Added', fix: 'Fixed', bug: 'Fixed', bugfix: 'Fixed',
+  perf: 'Changed', refactor: 'Changed', change: 'Changed',
+  remove: 'Removed', deprecate: 'Deprecated', security: 'Security',
+};
+const HIDDEN = new Set(['docs', 'chore', 'test', 'ci', 'build', 'style']);
+const CONVENTIONAL = new RegExp('^(' + [...Object.keys(TYPES), ...HIDDEN].join('|') + ')(?:e?s)?(?:\\(([^)]*)\\))?(!)?:\\s*', 'i');
 const SKIP = /^(release|bump|version)\b|^v?\d+\.\d+\.\d+\s*$/i;
 
+// Returns [section, text], or null when the commit should not appear in the changelog.
 function classify(subject) {
   const m = subject.match(CONVENTIONAL);
-  const text = subject.replace(CONVENTIONAL, '');
+  let text = subject.replace(CONVENTIONAL, '');
   // capitalise plain words only, so "make.sh: ..." and "iOS ..." stay as written
-  const t = /^[a-z]+(\s|$)/.test(text) ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+  if (/^[a-z]+(\s|$)/.test(text)) text = text.charAt(0).toUpperCase() + text.slice(1);
   if (m) {
     const kind = m[1].toLowerCase();
-    return [kind === 'feat' ? 'Added' : kind === 'fix' ? 'Fixed' : 'Changed', t];
+    if (HIDDEN.has(kind) && !m[3]) return null;
+    if (m[2]) text = `**${m[2]}:** ${text}`;
+    if (m[3]) text = `**Breaking:** ${text}`;
+    return [TYPES[kind] || 'Changed', text];
   }
-  if (/^(fix(e[sd])?|bug|resolve[sd]?|patch(ed|es)?)\b/i.test(text)) return ['Fixed', t];
-  if (/^(remove[sd]?|delete[sd]?|drop(ped|s)?)\b/i.test(text)) return ['Removed', t];
-  if (/^deprecat/i.test(text)) return ['Deprecated', t];
-  if (/^security\b/i.test(text)) return ['Security', t];
-  if (/^(add(ed|s)?|new|introduce[sd]?|implement(ed|s)?|support(ed|s)?|allow(ed|s)?|enable[sd]?|create[sd]?)\b/i.test(text)) return ['Added', t];
-  return ['Changed', t];
+  if (/^(fix(e[sd])?|bug|resolve[sd]?|patch(ed|es)?)\b/i.test(text)) return ['Fixed', text];
+  if (/^(remove[sd]?|delete[sd]?|drop(ped|s)?)\b/i.test(text)) return ['Removed', text];
+  if (/^deprecat/i.test(text)) return ['Deprecated', text];
+  if (/^security\b/i.test(text)) return ['Security', text];
+  if (/^(add(ed|s)?|new|introduce[sd]?|implement(ed|s)?|support(ed|s)?|allow(ed|s)?|enable[sd]?|create[sd]?)\b/i.test(text)) return ['Added', text];
+  return ['Changed', text];
 }
 
 const range = from ? `${from}..${to}` : to;
@@ -68,7 +81,9 @@ for (const line of log ? log.split('\n') : []) {
   const [full, short, ...rest] = line.split('\t');
   const subject = rest.join('\t').trim();
   if (!subject || SKIP.test(subject)) continue;
-  const [group, text] = classify(subject);
+  const hit = classify(subject);
+  if (!hit) continue;
+  const [group, text] = hit;
   groups[group].push(`- ${text} [${short}]`);// (${repoUrl ? `[${short}](${repoUrl}/commit/${full})` : short})`);
 }
 
