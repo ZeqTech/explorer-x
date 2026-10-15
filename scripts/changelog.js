@@ -1,14 +1,15 @@
-// Builds a changelog section in the "Keep a Changelog" layout from the git commits between two releases.
+// Builds a changelog section ("## 0.2.0 - 2026-10-15", then ### Added / Changed / Fixed ...) from the git
+// commits between two releases.
 //   node scripts/changelog.js                      commits since the latest v* tag, printed (and saved to
 //                                                  CHANGELOG.md if that file does not exist yet)
-//   node scripts/changelog.js --version 0.2.0      title the section "[0.2.0]" instead of "[Unreleased]"
+//   node scripts/changelog.js --version 0.2.0      title the section "0.2.0" instead of "Unreleased"
 //   node scripts/changelog.js --from v0.1.1 --to v0.1.2
-//   node scripts/changelog.js --write              also put the section at the top of CHANGELOG.md
+//   node scripts/changelog.js --write              also put the section at the top of CHANGELOG.md (older versions stay below it)
 //
 // Commits are sorted into Added / Changed / Fixed / Removed by their first word ("Add...", "Fix...",
 // "Remove...") or by a conventional-commit prefix ("feat:", "fix:"); everything else is "Changed".
 // Merge commits and release/version-bump commits are left out. When origin is a GitHub repository,
-// commits link to GitHub and each version gets a compare link at the bottom of the file.
+// commits link to GitHub and each section gets a "Full changelog" compare link.
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
@@ -71,9 +72,9 @@ for (const line of log ? log.split('\n') : []) {
 
 const version = opt('version') || 'Unreleased';
 const date = new Date().toISOString().slice(0, 10);
-const heading = version === 'Unreleased' ? '## [Unreleased]' : `## [${version}] - ${date}`;
 
-let section = heading + '\n\n';
+let section = `## ${version} - ${date}\n\n`;
+if (repoUrl && from) section += `Full changelog: ${repoUrl}/compare/${from}...${version === 'Unreleased' ? 'HEAD' : 'v' + version}\n\n`;
 const filled = ORDER.filter((g) => groups[g].length);
 section += filled.length ? filled.map((g) => `### ${g}\n\n${groups[g].join('\n')}\n`).join('\n') : '_No changes._\n';
 
@@ -84,41 +85,18 @@ const file = path.join(root, 'CHANGELOG.md');
 const existed = fs.existsSync(file);
 // --write always saves; otherwise the file is created when it does not exist yet (never overwritten).
 if (args.includes('--write') || (!existed && !opt('from') && !opt('to'))) {
-  const intro = '# Changelog\n\nAll notable changes to this project are documented in this file.\n\n'
-    + 'The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).\n\n';
-  const text = existed ? fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n') : intro;
+  const text = existed ? fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n') : '# Changelog\n\n';
 
-  // split into: intro, "## [..]" sections, and the link definitions at the bottom
-  const links = new Map();
-  const body = [];
-  for (const l of text.split('\n')) {
-    const m = l.match(/^\[([^\]]+)\]:\s*(\S+)\s*$/);
-    if (m) links.set(m[1], m[2]); else body.push(l);
-  }
-  const joined = body.join('\n').replace(/\n+$/, '\n');
-  const first = joined.search(/^## /m);
-  const head = first < 0 ? joined : joined.slice(0, first);
-  const kept = (first < 0 ? '' : joined.slice(first)).split(/^(?=## )/m).filter(Boolean)
-    .filter((s) => !s.startsWith('## [Unreleased]')) // a new version replaces the unreleased notes
-    .filter((s) => !s.startsWith(`## [${version}]`)); // re-running for a version replaces its section
+  // everything before the first "## " heading stays as the file's intro; each "## " block is a release
+  const first = text.search(/^## /m);
+  const head = first < 0 ? text : text.slice(0, first);
+  const nameOf = (s) => s.match(/^## (\S+)/)[1];
+  const kept = (first < 0 ? '' : text.slice(first)).split(/^(?=## )/m).filter(Boolean)
+    .filter((s) => nameOf(s) !== version)                         // re-running for a version replaces its section
+    .filter((s) => version === 'Unreleased' || nameOf(s) !== 'Unreleased'); // a real version replaces the unreleased notes
 
-  // newest first: [Unreleased], then versions in descending order
-  const nameOf = (s) => s.match(/^## \[([^\]]+)\]/)[1];
-  const nums = (v) => (v === 'Unreleased' ? [Infinity] : v.split('-')[0].split('.').map(Number));
-  const cmp = (a, b) => { const x = nums(a), y = nums(b); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (y[i] || 0) - (x[i] || 0); return 0; };
-  const all = [section, ...kept].map((s) => s.replace(/\n+$/, '\n')).sort((a, b) => cmp(nameOf(a), nameOf(b)));
-  const order = all.map(nameOf);
-
-  if (repoUrl) {
-    if (version === 'Unreleased') {
-      links.set('Unreleased', from ? `${repoUrl}/compare/${from}...HEAD` : `${repoUrl}/commits/HEAD`);
-    } else {
-      links.delete('Unreleased');
-      links.set(version, from ? `${repoUrl}/compare/${from}...v${version}` : `${repoUrl}/releases/tag/v${version}`);
-    }
-  }
-  const footer = order.filter((v) => links.has(v)).map((v) => `[${v}]: ${links.get(v)}`);
-
-  fs.writeFileSync(file, head.replace(/\n*$/, '\n\n') + all.join('\n') + (footer.length ? '\n' + footer.join('\n') + '\n' : ''));
+  // the new section goes at the top, right under the intro
+  const all = [section, ...kept].map((s) => s.replace(/\n+$/, '\n'));
+  fs.writeFileSync(file, head.replace(/\n*$/, '\n\n') + all.join('\n'));
   console.error((existed ? 'updated' : 'created') + ' CHANGELOG.md');
 }
