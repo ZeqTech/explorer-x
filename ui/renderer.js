@@ -346,40 +346,51 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     });
   }
   const clearPinMarks = () => document.querySelectorAll('#nav .drop-before, #nav .drop-after').forEach((x) => x.classList.remove('drop-before', 'drop-after'));
+  // Runs a change to the pins, redraws the sidebar and records it so Ctrl+Z can undo it.
+  const snapPins = () => ({ pins: [...state.pins], names: { ...state.pinNames } });
+  async function pinEdit(label, mutate) {
+    const before = snapPins();
+    await mutate();
+    const after = snapPins();
+    if (JSON.stringify(before) !== JSON.stringify(after)) {
+      const restore = (snap) => async () => { state.pins = [...snap.pins]; state.pinNames = { ...snap.names }; savePrefs(); await renderNav(false); };
+      record({ label, undo: restore(before), redo: restore(after) });
+    }
+    savePrefs(); await renderNav(false);
+  }
   async function reorderPin(from, target, after) {
     if (from === target) return;
-    state.pins.splice(state.pins.indexOf(from), 1);
-    state.pins.splice(state.pins.indexOf(target) + (after ? 1 : 0), 0, from);
-    savePrefs(); await renderNav(false);
+    await pinEdit('Reorder pins', () => {
+      state.pins.splice(state.pins.indexOf(from), 1);
+      state.pins.splice(state.pins.indexOf(target) + (after ? 1 : 0), 0, from);
+    });
   }
   async function movePin(p, delta) {
     const i = state.pins.indexOf(p), j = i + delta;
     if (i < 0 || j < 0 || j >= state.pins.length) return;
-    [state.pins[i], state.pins[j]] = [state.pins[j], state.pins[i]];
-    savePrefs(); await renderNav(false);
+    await pinEdit('Move pin ' + (delta < 0 ? 'up' : 'down'), () => { [state.pins[i], state.pins[j]] = [state.pins[j], state.pins[i]]; });
   }
   const isWindows = () => !state.mac && state.sep === '\\';
   async function importPins() {
     toast('Reading File Explorer pins…');
     const found = await api.importExplorerPins();
     const fresh = found.filter((p) => !state.pins.includes(p));
-    state.pins.push(...fresh);
-    savePrefs(); await renderNav(false);
+    await pinEdit('Import pins from File Explorer', () => { state.pins.push(...fresh); });
     toast(fresh.length ? 'Imported ' + fresh.length + ' pin(s) from File Explorer'
       : found.length ? 'All File Explorer pins are already pinned' : 'No pinned folders found in File Explorer');
   }
   async function togglePin(p) {
     const i = state.pins.indexOf(p);
-    if (i >= 0) { state.pins.splice(i, 1); delete state.pinNames[p]; } else state.pins.push(p);
-    savePrefs(); await renderNav(false);
+    await pinEdit((i >= 0 ? 'Unpin "' : 'Pin "') + baseName(p) + '"', () => {
+      if (i >= 0) { state.pins.splice(i, 1); delete state.pinNames[p]; } else state.pins.push(p);
+    });
   }
   // Pins every folder in `paths` that is not pinned yet; plain files are ignored.
   async function pinFolders(paths) {
     const dirs = [];
     for (const p of paths) if (!state.pins.includes(p) && await api.isDir(p).catch(() => false)) dirs.push(p);
     if (!dirs.length) { toast(paths.some((p) => state.pins.includes(p)) ? 'Already pinned' : 'Only folders can be pinned'); return; }
-    state.pins.push(...dirs);
-    savePrefs(); await renderNav(false);
+    await pinEdit('Pin ' + plural(dirs.length, 'folder'), () => { state.pins.push(...dirs); });
     toast('Pinned ' + plural(dirs.length, 'folder'));
   }
   function addRecent(dir) {
@@ -393,8 +404,7 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
   }
   async function setPinName(p, name) {
     name = name.trim();
-    if (!name || name === baseName(p)) delete state.pinNames[p]; else state.pinNames[p] = name;
-    savePrefs(); await renderNav(false);
+    await pinEdit('Rename pin', () => { if (!name || name === baseName(p)) delete state.pinNames[p]; else state.pinNames[p] = name; });
   }
   async function renamePin(p) {
     const name = await promptDialog({ title: 'Rename pin', label: p, value: pinLabel(p), okText: 'Rename' });
@@ -415,11 +425,12 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     });
     if (text == null) return;
     let added = 0;
-    for (const { path, name } of parsed) {
-      if (!state.pins.includes(path)) { state.pins.push(path); added++; }
-      if (name) state.pinNames[path] = name;
-    }
-    savePrefs(); await renderNav(false);
+    await pinEdit('Import pins', () => {
+      for (const { path, name } of parsed) {
+        if (!state.pins.includes(path)) { state.pins.push(path); added++; }
+        if (name) state.pinNames[path] = name;
+      }
+    });
     toast(added ? 'Imported ' + plural(added, 'pin') : 'Those pins were already in the sidebar');
   }
 
