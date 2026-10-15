@@ -213,6 +213,20 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
       ]);
     };
     nav.oncontextmenu = pinsMenu;
+    // Dropping folders from the file list onto empty sidebar space or a heading pins them.
+    const onBlank = (ev) => ev.target === nav || ev.target.tagName === 'H4';
+    nav.ondragover = (ev) => {
+      if (dragPin || !onBlank(ev) || !ev.dataTransfer.types.includes('text/x-explorerx')) return;
+      ev.preventDefault(); nav.classList.add('dropzone');
+    };
+    nav.ondragleave = (ev) => { if (!nav.contains(ev.relatedTarget)) nav.classList.remove('dropzone'); };
+    nav.ondrop = guard(async (ev) => {
+      nav.classList.remove('dropzone');
+      if (dragPin || !onBlank(ev)) return;
+      ev.preventDefault();
+      const raw = ev.dataTransfer.getData('text/x-explorerx'); if (!raw) return;
+      await pinFolders(JSON.parse(raw));
+    });
     const section = (title, items, pinned) => {
       const h = document.createElement('h4'); h.textContent = title; nav.appendChild(h);
       h.oncontextmenu = pinsMenu;
@@ -317,6 +331,15 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
     const i = state.pins.indexOf(p);
     if (i >= 0) { state.pins.splice(i, 1); delete state.pinNames[p]; } else state.pins.push(p);
     savePrefs(); await renderNav();
+  }
+  // Pins every folder in `paths` that is not pinned yet; plain files are ignored.
+  async function pinFolders(paths) {
+    const dirs = [];
+    for (const p of paths) if (!state.pins.includes(p) && await api.isDir(p).catch(() => false)) dirs.push(p);
+    if (!dirs.length) { toast(paths.some((p) => state.pins.includes(p)) ? 'Already pinned' : 'Only folders can be pinned'); return; }
+    state.pins.push(...dirs);
+    savePrefs(); await renderNav();
+    toast('Pinned ' + plural(dirs.length, 'folder'));
   }
   async function setPinName(p, name) {
     name = name.trim();
