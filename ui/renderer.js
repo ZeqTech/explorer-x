@@ -8,11 +8,11 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
   const state = {
     cwd: null, history: [], hi: -1, entries: [], sel: new Set(), anchor: null,
     sortKey: 'name', sortDir: 1, view: 'details', showHidden: false, preview: false, cut: new Set(),
-    mac: false, sep: '/', searchMode: false, pins: [], pinNames: {}, icon: 64, navw: 230,
+    mac: false, sep: '/', searchMode: false, pins: [], pinNames: {}, recent: [], icon: 64, navw: 230,
   };
 
   // Per-user preferences, persisted in localStorage (best effort).
-  const PREF_KEYS = ['pins', 'pinNames', 'icon', 'navw', 'view', 'sortKey', 'sortDir', 'showHidden', 'preview'];
+  const PREF_KEYS = ['pins', 'pinNames', 'recent', 'icon', 'navw', 'view', 'sortKey', 'sortDir', 'showHidden', 'preview'];
   const savePrefs = () => {
     try { localStorage.setItem('explorerx', JSON.stringify(Object.fromEntries(PREF_KEYS.map((k) => [k, state[k]])))); } catch { /* ignore */ }
   };
@@ -170,7 +170,10 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
       state.entries = await api.list(dir, state.showHidden);
     } catch (e) { toast('Cannot open ' + dir + ': ' + e.message); return; }
     state.cwd = dir; state.sel.clear(); state.anchor = null; state.searchMode = false; $('search').value = '';
-    if (push) { state.history = state.history.slice(0, state.hi + 1); state.history.push(dir); state.hi = state.history.length - 1; }
+    if (push) {
+      state.history = state.history.slice(0, state.hi + 1); state.history.push(dir); state.hi = state.history.length - 1;
+      if (addRecent(dir)) renderNav(false);
+    }
     document.title = dir.split(/[\\/]/).filter(Boolean).pop() || dir;
     render(); renderCrumbs(); renderNavActive(); syncTab();
   }
@@ -202,7 +205,11 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
 
   const pinLabel = (p) => state.pinNames[p] || baseName(p) || p;
 
-  async function renderNav() {
+  // Drives and Quick access rarely change, so they are read once and reused while navigating.
+  let places = null;
+  const missingPins = new Set();
+  async function renderNav(reload = true) {
+    if (reload || !places) places = { quick: await api.quickAccess(), drives: await api.drives() };
     const nav = $('nav'); nav.textContent = '';
     const pinsMenu = (ev) => {
       ev.preventDefault(); ev.stopPropagation();
@@ -227,12 +234,12 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
       const raw = ev.dataTransfer.getData('text/x-explorerx'); if (!raw) return;
       await pinFolders(JSON.parse(raw));
     });
-    const section = (title, items, pinned) => {
+    const section = (title, items, pinned, extraMenu = []) => {
       const h = document.createElement('h4'); h.textContent = title; nav.appendChild(h);
       h.oncontextmenu = pinsMenu;
       items.forEach((it, idx) => {
         const d = document.createElement('div'); d.textContent = it.name; d.title = it.path; d.dataset.path = it.path;
-        if (pinned) { d.classList.add('pin'); if (idx < 9) d.title = it.path + '  (' + (state.mac ? '⌘' : 'Ctrl+') + (idx + 1) + ')'; }
+        if (pinned) { d.classList.add('pin'); if (missingPins.has(it.path)) { d.classList.add('missing'); d.title = 'Folder not found: ' + it.path; } if (idx < 9) d.title = it.path + '  (' + (state.mac ? '⌘' : 'Ctrl+') + (idx + 1) + ')'; }
         d.oncontextmenu = (ev) => {
           ev.preventDefault(); ev.stopPropagation();
           showCustomMenu(ev.clientX, ev.clientY, [
@@ -249,6 +256,7 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
               ['Move up', () => movePin(it.path, -1), state.pins.indexOf(it.path) > 0],
               ['Move down', () => movePin(it.path, 1), state.pins.indexOf(it.path) < state.pins.length - 1],
             ] : []),
+            ...extraMenu.map(([label, fn]) => [label, () => fn(it.path)]),
           ]);
         };
         d.onclick = () => {
@@ -262,16 +270,24 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
       });
     };
     if (state.pins.length) section('Pinned', state.pins.map((p) => ({ name: pinLabel(p), path: p })), true);
-    section('Quick access', await api.quickAccess());
-    section('This computer', await api.drives());
+    const recent = state.recent.filter((p) => !state.pins.includes(p)).slice(0, 6);
+    if (recent.length) {
+      section('Recent', recent.map((p) => ({ name: baseName(p), path: p })), false, [
+        ['Remove from recent', (p) => forgetRecent(p)],
+        ['Clear recent folders', () => forgetRecent(null)],
+      ]);
+    }
+    section('Quick access', places.quick);
+    section('This computer', places.drives);
     renderNavActive();
-    markMissingPins();
+    if (reload) markMissingPins();
   }
   // Pins whose folder is gone (deleted, or a drive that is not connected) are struck through.
   // Checked after the sidebar is drawn so a slow network drive cannot hold it up.
   async function markMissingPins() {
     await Promise.all(state.pins.map(async (p) => {
       const ok = await api.isDir(p).catch(() => false);
+      if (ok) missingPins.delete(p); else missingPins.add(p);
       document.querySelectorAll('#nav div.pin').forEach((d) => {
         if (d.dataset.path !== p) return;
         d.classList.toggle('missing', !ok);
@@ -309,13 +325,13 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
     if (from === target) return;
     state.pins.splice(state.pins.indexOf(from), 1);
     state.pins.splice(state.pins.indexOf(target) + (after ? 1 : 0), 0, from);
-    savePrefs(); await renderNav();
+    savePrefs(); await renderNav(false);
   }
   async function movePin(p, delta) {
     const i = state.pins.indexOf(p), j = i + delta;
     if (i < 0 || j < 0 || j >= state.pins.length) return;
     [state.pins[i], state.pins[j]] = [state.pins[j], state.pins[i]];
-    savePrefs(); await renderNav();
+    savePrefs(); await renderNav(false);
   }
   const isWindows = () => !state.mac && state.sep === '\\';
   async function importPins() {
@@ -323,14 +339,14 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
     const found = await api.importExplorerPins();
     const fresh = found.filter((p) => !state.pins.includes(p));
     state.pins.push(...fresh);
-    savePrefs(); await renderNav();
+    savePrefs(); await renderNav(false);
     toast(fresh.length ? 'Imported ' + fresh.length + ' pin(s) from File Explorer'
       : found.length ? 'All File Explorer pins are already pinned' : 'No pinned folders found in File Explorer');
   }
   async function togglePin(p) {
     const i = state.pins.indexOf(p);
     if (i >= 0) { state.pins.splice(i, 1); delete state.pinNames[p]; } else state.pins.push(p);
-    savePrefs(); await renderNav();
+    savePrefs(); await renderNav(false);
   }
   // Pins every folder in `paths` that is not pinned yet; plain files are ignored.
   async function pinFolders(paths) {
@@ -338,13 +354,22 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
     for (const p of paths) if (!state.pins.includes(p) && await api.isDir(p).catch(() => false)) dirs.push(p);
     if (!dirs.length) { toast(paths.some((p) => state.pins.includes(p)) ? 'Already pinned' : 'Only folders can be pinned'); return; }
     state.pins.push(...dirs);
-    savePrefs(); await renderNav();
+    savePrefs(); await renderNav(false);
     toast('Pinned ' + plural(dirs.length, 'folder'));
+  }
+  function addRecent(dir) {
+    if (state.recent[0] === dir) return false;
+    state.recent = [dir, ...state.recent.filter((p) => p !== dir)].slice(0, 12);
+    savePrefs(); return true;
+  }
+  async function forgetRecent(path) {
+    state.recent = path ? state.recent.filter((p) => p !== path) : [];
+    savePrefs(); await renderNav(false);
   }
   async function setPinName(p, name) {
     name = name.trim();
     if (!name || name === baseName(p)) delete state.pinNames[p]; else state.pinNames[p] = name;
-    savePrefs(); await renderNav();
+    savePrefs(); await renderNav(false);
   }
   async function renamePin(p) {
     const name = await promptDialog({ title: 'Rename pin', label: p, value: pinLabel(p), okText: 'Rename' });
@@ -369,7 +394,7 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
       if (!state.pins.includes(path)) { state.pins.push(path); added++; }
       if (name) state.pinNames[path] = name;
     }
-    savePrefs(); await renderNav();
+    savePrefs(); await renderNav(false);
     toast(added ? 'Imported ' + plural(added, 'pin') : 'Those pins were already in the sidebar');
   }
 
