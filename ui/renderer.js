@@ -195,13 +195,28 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     };
     if (root) add(state.sep, state.sep);
     parts.forEach((part, i) => {
+      const parentDir = acc || root;
       acc = i === 0 && !root ? part + state.sep : joinPath(acc || root, part);
-      if (i > 0 || root) { const sep = document.createElement('i'); sep.textContent = '›'; c.appendChild(sep); }
+      if (i > 0 || root) {
+        // the arrow lists the folders next to this one, like the arrows in Windows File Explorer
+        const sep = document.createElement('i'), here = acc;
+        sep.textContent = '›'; sep.title = 'Folders in ' + parentDir;
+        sep.onclick = guard(async (ev) => { ev.stopPropagation(); await crumbMenu(sep, parentDir, here); });
+        c.appendChild(sep);
+      }
       add(part, acc);
     });
     $('back').disabled = state.hi <= 0;
     $('fwd').disabled = state.hi >= state.history.length - 1;
     $('up').disabled = !parentOf(state.cwd) || parentOf(state.cwd) === state.cwd;
+  }
+
+  async function crumbMenu(anchor, dir, current) {
+    const dirs = (await api.list(dir, state.showHidden)).filter((e) => e.isDir)
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+    if (!dirs.length) { toast('No folders in ' + dir); return; }
+    const r = anchor.getBoundingClientRect();
+    showCustomMenu(r.left, r.bottom, dirs.map((e) => [(e.path === current ? '✓ ' : '') + e.name, () => go(e.path)]));
   }
 
   const pinLabel = (p) => state.pinNames[p] || baseName(p) || p;

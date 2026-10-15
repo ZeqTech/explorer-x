@@ -11,6 +11,7 @@ The **Added** column holds a release version, or a date for work not released ye
 | Feature | How to use it | Added |
 | --- | --- | --- |
 | Address bar and breadcrumbs | Click a folder name to jump to it, or click the bar to type a path (`~` works) | initial |
+| Breadcrumb dropdowns | Click the `›` between folders in the address bar to list the folders at that level and jump to one | 2026-10-15 |
 | Back, forward, up | Toolbar buttons, `Alt+Left`, `Alt+Right`, `Alt+Up`, `Backspace` | initial |
 | Tabs | `Ctrl+T` new tab, `Ctrl+W` close, `Ctrl+Tab` cycle, middle-click a folder to open it in a new tab | initial |
 | Details and icon views | The **View** button; the slider or `Ctrl+scroll` changes icon size | initial |

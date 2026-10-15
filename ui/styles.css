@@ -19,7 +19,8 @@ button.on { background: var(--sel); }
 #crumbs { display: flex; align-items: center; overflow: hidden; padding: 0 4px; cursor: text; }
 #crumbs span { padding: 2px 5px; border-radius: 3px; cursor: pointer; white-space: nowrap; }
 #crumbs span:hover { background: var(--hover); }
-#crumbs i { color: var(--muted); font-style: normal; }
+#crumbs i { color: var(--muted); font-style: normal; padding: 2px 4px; border-radius: 3px; cursor: pointer; }
+#crumbs i:hover { background: var(--hover); color: var(--fg); }
 #address { padding: 0 8px; outline: 2px solid var(--accent); }
 #search { width: 220px; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); }
 #commandbar { display: flex; gap: 2px; padding: 4px 8px; border-bottom: 1px solid var(--line); align-items: center; }
@@ -66,7 +67,7 @@ body.resizing { cursor: col-resize; }
 .tile .nm { font-size: 12px; max-height: 3.6em; overflow: hidden; }
 .rename { flex: 1; min-width: 0; width: 100%; font: inherit; background: var(--bg); border: 1px solid var(--accent); }
 #status { display: flex; justify-content: space-between; padding: 4px 12px; border-top: 1px solid var(--line); background: var(--bar); color: var(--muted); }
-#menu { position: fixed; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.25); padding: 4px; min-width: 190px; z-index: 10; }
+#menu { position: fixed; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.25); padding: 4px; min-width: 190px; max-height: 70vh; overflow-y: auto; z-index: 10; }
 #menu div { padding: 5px 14px; border-radius: 4px; cursor: pointer; }
 #menu div:hover { background: var(--hover); }
 #menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
