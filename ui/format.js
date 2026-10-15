@@ -81,3 +81,39 @@ export function parsePins(text) {
   if (!out.length) throw new Error('No folder paths found.');
   return out;
 }
+
+/** Splits "report.final.txt" into ["report.final", ".txt"]; folders and dotfiles keep their whole name. */
+export function splitExt(name, isDir) {
+  const i = name.lastIndexOf('.');
+  return isDir || i <= 0 ? [name, ''] : [name.slice(0, i), name.slice(i)];
+}
+
+/**
+ * Plans a batch rename. `items` is [{ name, isDir }] in the order they should be numbered;
+ * `others` lists names that exist in the folder and are not being renamed.
+ * Options: find / replace (plain text, applied to the name without its extension), template
+ * ("Holiday {n:2} {name}": {name} is the name after find/replace, {n} a counter, {n:3} a counter
+ * padded to 3 digits) and start (first counter value). Extensions are kept.
+ * Returns [{ from, to, error? }]; `to` equals `from` when nothing changes.
+ */
+export function planRename(items, { find = '', replace = '', template = '{name}', start = 1, others = [] } = {}) {
+  const tpl = template || '{name}';
+  const out = items.map((it, i) => {
+    const [stem, ext] = splitExt(it.name, it.isDir);
+    const base = find ? stem.split(find).join(replace) : stem;
+    const next = tpl.replace(/\{name\}/g, base).replace(/\{n(?::(\d+))?\}/g, (_, pad) => String(start + i).padStart(+pad || 0, '0')) + ext;
+    return { from: it.name, to: next };
+  });
+  const existing = new Set(others.map((o) => o.toLowerCase()));
+  const count = new Map();
+  for (const r of out) count.set(r.to.toLowerCase(), (count.get(r.to.toLowerCase()) || 0) + 1);
+  for (const r of out) {
+    const key = r.to.toLowerCase();
+    if (!r.to.trim() || r.to === '.' || r.to === '..') r.error = 'Name is empty';
+    else if (/[\\/:*?"<>|\0]/.test(r.to)) r.error = 'Contains a character that is not allowed';
+    else if (/[. ]$/.test(r.to)) r.error = 'Cannot end with a dot or space';
+    else if (existing.has(key)) r.error = 'Already exists';
+    else if (count.get(key) > 1) r.error = 'Same name as another item';
+  }
+  return out;
+}

@@ -107,6 +107,51 @@ export function promptDialog({ title, label, value = '', okText = 'OK', multilin
   });
 }
 
+// ---- batch rename -----------------------------------------------------------------
+
+/**
+ * Renames several items with a live preview. `plan(options)` returns [{ from, to, error? }]
+ * (see planRename). Resolves to the plan to apply, or null if cancelled.
+ */
+export function batchRenameDialog(count, plan) {
+  return new Promise((resolve) => {
+    let close = () => {};
+    const finish = (v) => { close(); resolve(v); };
+    const find = el('input', { className: 'field', type: 'text', placeholder: 'Text to find', spellcheck: false });
+    const replace = el('input', { className: 'field', type: 'text', placeholder: 'Replace with', spellcheck: false });
+    const template = el('input', { className: 'field', type: 'text', value: '{name}', spellcheck: false });
+    const start = el('input', { className: 'field', type: 'number', value: '1', min: '0' });
+    const list = el('div', { className: 'renamelist' });
+    const summary = el('p', { className: 'muted' }, '');
+    const ok = el('button', { className: 'primary' }, 'Rename');
+    let current = [];
+    const update = () => {
+      current = plan({ find: find.value, replace: replace.value, template: template.value, start: Math.max(0, parseInt(start.value, 10) || 0) });
+      list.textContent = '';
+      for (const r of current) {
+        list.append(el('div', { className: 'rrow' + (r.error ? ' bad' : r.to === r.from ? ' same' : '') },
+          el('span', { className: 'old' }, r.from), el('span', { className: 'arrow' }, '→'),
+          el('span', { className: 'new' }, r.to + (r.error ? '  — ' + r.error : ''))));
+      }
+      const changed = current.filter((r) => r.to !== r.from).length, bad = current.filter((r) => r.error).length;
+      summary.textContent = bad ? plural(bad, 'name') + ' cannot be used.' : changed ? plural(changed, 'item') + ' will be renamed.' : 'Nothing to rename yet.';
+      ok.disabled = bad > 0 || changed === 0;
+    };
+    ok.onclick = () => finish(current.filter((r) => r.to !== r.from));
+    for (const i of [find, replace, template, start]) i.oninput = update;
+    const field = (label, input) => el('label', { className: 'lrow' }, el('span', {}, label), input);
+    const body = el('div', { className: 'dlg wide' },
+      el('h3', {}, 'Rename ' + plural(count, 'item')),
+      field('Find', find), field('Replace with', replace),
+      field('New name', template), field('Start numbering at', start),
+      el('p', { className: 'muted' }, 'In the new name, {name} is the original name and {n} is a counter ({n:3} pads it to 3 digits). Extensions are kept.'),
+      list, summary,
+      el('div', { className: 'btns' }, el('button', { onclick: () => finish(null) }, 'Cancel'), ok));
+    close = show(body, { onEscape: () => finish(null) });
+    update(); find.focus();
+  });
+}
+
 // ---- progress -----------------------------------------------------------------
 
 /**

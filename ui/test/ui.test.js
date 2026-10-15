@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { UndoStack } from '../undo.js';
-import { fmtSize, parentOf, joinPath, baseName, iconKey, plural, invertMoves, typeOf, parsePins } from '../format.js';
+import { fmtSize, parentOf, joinPath, baseName, iconKey, plural, invertMoves, typeOf, parsePins, planRename, splitExt } from '../format.js';
 
 test('fmtSize', () => {
   assert.equal(fmtSize(null), '');
@@ -84,4 +84,26 @@ test('parsePins accepts JSON, arrays and plain path lists', () => {
   assert.throws(() => parsePins('{oops'), /valid JSON/);
   assert.throws(() => parsePins('{"a":1}'), /list of pins/);
   assert.throws(() => parsePins('[1, null]'), /No folder paths/);
+});
+
+test('splitExt keeps folders and dotfiles whole', () => {
+  assert.deepEqual(splitExt('a.b.txt', false), ['a.b', '.txt']);
+  assert.deepEqual(splitExt('.gitignore', false), ['.gitignore', '']);
+  assert.deepEqual(splitExt('v1.2', true), ['v1.2', '']);
+});
+
+test('planRename: find/replace, numbering and conflicts', () => {
+  const files = [{ name: 'IMG_1.jpg' }, { name: 'IMG_2.jpg' }, { name: 'notes.txt' }];
+  assert.deepEqual(planRename(files, { find: 'IMG', replace: 'Trip' }).map((r) => r.to), ['Trip_1.jpg', 'Trip_2.jpg', 'notes.txt']);
+  assert.deepEqual(planRename(files, { template: 'Photo {n:3}', start: 7 }).map((r) => r.to), ['Photo 007.jpg', 'Photo 008.jpg', 'Photo 009.txt']);
+  assert.equal(planRename(files, { template: 'same' }).filter((r) => r.error).length, 2);
+  assert.equal(planRename([{ name: 'a.txt' }], { template: 'b', others: ['B.txt'] })[0].error, 'Already exists');
+  assert.match(planRename([{ name: 'a.txt' }], { template: 'x/y' })[0].error, /not allowed/);
+  assert.match(planRename([{ name: 'a.txt' }], { template: '{name}.' , find: '', replace: '' })[0].error || '', /dot|^$/);
+  assert.equal(planRename([{ name: 'a.txt' }])[0].to, 'a.txt');
+});
+
+test('planRename rejects backslashes and trailing dots', () => {
+  assert.match(planRename([{ name: 'a.txt' }], { template: 'x' + String.fromCharCode(92) + 'y' })[0].error, /not allowed/);
+  assert.match(planRename([{ name: 'a' }], { template: 'x.' })[0].error, /dot or space/);
 });

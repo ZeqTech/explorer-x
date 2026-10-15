@@ -1,6 +1,6 @@
-import { iconKey, fmtSize, fmtDate, fmtDateTime, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves, parsePins } from './format.js';
+import { iconKey, fmtSize, fmtDate, fmtDateTime, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves, parsePins, planRename } from './format.js';
 import { UndoStack } from './undo.js';
-import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, multiPropertiesDialog, dialogOpen } from './dialogs.js';
+import { el, conflictDialog, promptDialog, batchRenameDialog, progressDialog, propertiesDialog, multiPropertiesDialog, dialogOpen } from './dialogs.js';
 
 (() => {
   const api = window.fsapi;
@@ -595,8 +595,38 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
   });
   const doNewFolder = createNew(true), doNewFile = createNew(false);
 
+  // Renames [{from, to}] (full paths). When a new name collides with another item's old name
+  // (swaps, shifted numbering, case-only changes) everything goes through temporary names first.
+  async function renameBatch(pairs) {
+    const lc = (p) => baseName(p).toLowerCase();
+    const olds = new Set(pairs.map((m) => lc(m.from)));
+    const tricky = pairs.some((m) => olds.has(lc(m.to)));
+    if (!tricky) return api.renameMany(pairs);
+    const stamp = Date.now().toString(36);
+    const temps = pairs.map((m, i) => ({ from: m.from, to: joinPath(parentOf(m.from), '.xrename-' + stamp + '-' + i) }));
+    await api.renameMany(temps);
+    await api.renameMany(temps.map((t, i) => ({ from: t.to, to: pairs[i].to })));
+  }
+  const batchRename = guard(async () => {
+    const s = selected(); if (s.length < 2) return;
+    const dir = parentOf(s[0].path);
+    const others = state.entries.filter((e) => !state.sel.has(e.path)).map((e) => e.name);
+    const plan = await batchRenameDialog(s.length, (opts) => planRename(s, { ...opts, others }));
+    if (!plan) return;
+    const byName = new Map(s.map((e) => [e.name, e]));
+    const pairs = plan.map((r) => ({ from: byName.get(r.from).path, to: joinPath(dir, r.to) }));
+    await renameBatch(pairs);
+    const label = 'Rename ' + plural(pairs.length, 'item');
+    const back = invertMoves(pairs);
+    record({ label, undo: () => renameBatch(back), redo: () => renameBatch(pairs) });
+    await refresh();
+    state.sel = new Set(pairs.map((m) => m.to)); paintSel();
+    toast('Renamed ' + plural(pairs.length, 'item'));
+  });
+
   function startRename() {
-    const s = selected(); if (s.length !== 1) return;
+    const s = selected(); if (s.length > 1) return batchRename();
+    if (s.length !== 1) return;
     const el = document.querySelector('[data-path="' + CSS.escape(s[0].path) + '"] .nm'); if (!el) return;
     const inp = document.createElement('input'); inp.className = 'rename'; inp.value = s[0].name;
     el.replaceWith(inp); inp.focus();
@@ -689,7 +719,7 @@ import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, mul
       ['Open in terminal', () => doTerminal(selected()[0].path), one],
       null, ['Cut', () => doCopy(true)], ['Copy', () => doCopy(false)],
       ['Copy path', () => doCopyPath()], ['Copy name', doCopyName], ['Duplicate', doDuplicate], null,
-      ['Rename', startRename, one], [state.mac ? 'Move to Trash' : 'Delete', doDelete], null,
+      [one ? 'Rename' : 'Rename…', startRename, state.sel.size > 0], [state.mac ? 'Move to Trash' : 'Delete', doDelete], null,
       ['Properties', doProperties],
     ] : [
       [state.pins.includes(state.cwd) ? 'Unpin this folder' : 'Pin this folder', () => togglePin(state.cwd)],
