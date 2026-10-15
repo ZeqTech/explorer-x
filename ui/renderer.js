@@ -659,19 +659,30 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     record({ label: 'Delete ' + plural(paths.length, 'item'), undo: () => api.restoreTrashed(paths), redo: () => api.trash(paths) });
     await refresh();
   });
+  // Runs a backend operation behind a progress dialog with a Cancel button. Resolves to null when cancelled.
+  async function withProgress(title, run) {
+    const opId = api.newOpId();
+    const dlg = progressDialog({ title, onCancel: () => api.cancelOp(opId), delay: 300 });
+    activeOps.set(opId, dlg);
+    try { return await run(opId); }
+    catch (e) { if (e.message === 'Cancelled') return null; throw e; }
+    finally { activeOps.delete(opId); dlg.close(); }
+  }
   // Zip files are created / extracted next to the originals; undo sends the result to the Trash.
   const doCompress = guard(async () => {
     const paths = selected().map((e) => e.path); if (!paths.length) return;
-    toast('Compressing…');
-    let out = await api.compress(paths);
-    record({ label: 'Compress ' + plural(paths.length, 'item'), undo: () => api.trash([out]), redo: async () => { out = await api.compress(paths); } });
+    const make = () => withProgress('Compressing ' + plural(paths.length, 'item') + '…', (id) => api.compress(paths, id));
+    let out = await make();
+    if (!out) { toast('Cancelled'); return; }
+    record({ label: 'Compress ' + plural(paths.length, 'item'), undo: () => api.trash([out]), redo: async () => { out = await make(); } });
     await refresh(); state.sel = new Set([out]); paintSel(); toast('Created ' + baseName(out));
   });
   const doExtract = guard(async () => {
     const z = selected()[0]; if (!z) return;
-    toast('Extracting…');
-    let out = await api.extractZip(z.path);
-    record({ label: 'Extract ' + z.name, undo: () => api.trash([out]), redo: async () => { out = await api.extractZip(z.path); } });
+    const run = () => withProgress('Extracting ' + z.name + '…', (id) => api.extractZip(z.path, id));
+    let out = await run();
+    if (!out) { toast('Cancelled'); return; }
+    record({ label: 'Extract ' + z.name, undo: () => api.trash([out]), redo: async () => { out = await run(); } });
     await refresh(); state.sel = new Set([out]); paintSel(); toast('Extracted to ' + baseName(out));
   });
   // Scans `root` for files with identical contents and offers to trash the extra copies.

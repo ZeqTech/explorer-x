@@ -102,6 +102,9 @@ pub struct DirStats {
 /// Receives byte counts while copying. Returning `Err` aborts the operation (used for cancel).
 pub trait Progress {
     fn advance(&mut self, bytes: u64, current: &str) -> Res<()>;
+    /// Tells the listener how many bytes the whole operation will process, when that is only known
+    /// after the operation has looked at its input (e.g. the uncompressed size of an archive).
+    fn set_total(&mut self, _total: u64) {}
 }
 
 pub struct NoProgress;
@@ -462,9 +465,22 @@ pub fn find_duplicates(root: &str, p: &mut dyn Progress) -> Res<Vec<DupGroup>> {
 
 // ---- zip --------------------------------------------------------------------
 
+/// Copies `from` into the archive entry that is currently open, reporting progress and honouring cancel.
+fn zip_copy<R: Read, W: Write>(from: &mut R, to: &mut W, name: &str, p: &mut dyn Progress) -> Res<()> {
+    let mut buf = vec![0u8; 256 * 1024];
+    loop {
+        let n = from.read(&mut buf).map_err(err)?;
+        if n == 0 {
+            return Ok(());
+        }
+        to.write_all(&buf[..n]).map_err(err)?;
+        p.advance(n as u64, name)?;
+    }
+}
+
 /// Adds `path` (a file, or a folder with everything in it) to the archive under `name`.
 /// Symlinks are skipped so an archive never pulls in files from outside the selection.
-fn zip_add<W: Write + std::io::Seek>(z: &mut zip::ZipWriter<W>, path: &Path, name: &str) -> Res<()> {
+fn zip_add<W: Write + std::io::Seek>(z: &mut zip::ZipWriter<W>, path: &Path, name: &str, p: &mut dyn Progress) -> Res<()> {
     use zip::write::SimpleFileOptions;
     let md = fs::symlink_metadata(path).map_err(err)?;
     if md.file_type().is_symlink() {
@@ -476,19 +492,20 @@ fn zip_add<W: Write + std::io::Seek>(z: &mut zip::ZipWriter<W>, path: &Path, nam
         let mut kids: Vec<_> = fs::read_dir(path).map_err(err)?.flatten().collect();
         kids.sort_by_key(|k| k.file_name());
         for k in kids {
-            zip_add(z, &k.path(), &format!("{name}/{}", k.file_name().to_string_lossy()))?;
+            zip_add(z, &k.path(), &format!("{name}/{}", k.file_name().to_string_lossy()), p)?;
         }
     } else {
         z.start_file(name, opts).map_err(err)?;
         let mut f = fs::File::open(path).map_err(err)?;
-        std::io::copy(&mut f, z).map_err(err)?;
+        zip_copy(&mut f, z, name, p)?;
     }
     Ok(())
 }
 
 /// Zips `paths` into a new archive next to the first one and returns its path. One item gives
-/// "<name>.zip", several give "Archive.zip"; an existing archive is never overwritten.
-pub fn compress(paths: &[String]) -> Res<String> {
+/// "<name>.zip", several give "Archive.zip"; an existing archive is never overwritten. If the
+/// operation fails or is cancelled the half-written archive is removed.
+pub fn compress(paths: &[String], p: &mut dyn Progress) -> Res<String> {
     let first = Path::new(paths.first().ok_or("Nothing to compress")?);
     let parent = first.parent().ok_or("Invalid path")?;
     let base = if paths.len() == 1 {
@@ -498,11 +515,12 @@ pub fn compress(paths: &[String]) -> Res<String> {
         "Archive".to_string()
     };
     let target = parent.join(unique_name(&format!("{base}.zip"), &names_in(parent)?));
+    p.set_total(total_size(paths));
     let result = (|| -> Res<()> {
         let mut z = zip::ZipWriter::new(fs::File::create(&target).map_err(err)?);
-        for p in paths {
-            let p = Path::new(p);
-            zip_add(&mut z, p, &file_name_of(p)?)?;
+        for item in paths {
+            let item = Path::new(item);
+            zip_add(&mut z, item, &file_name_of(item)?, p)?;
         }
         z.finish().map_err(err)?;
         Ok(())
@@ -515,16 +533,43 @@ pub fn compress(paths: &[String]) -> Res<String> {
 }
 
 /// Extracts a .zip into a new folder named after it (next to the archive) and returns that folder.
-pub fn extract(zip_path: &str) -> Res<String> {
+/// Entries that would land outside the folder (".." or absolute paths) and symlinks are skipped.
+/// If the operation fails or is cancelled the half-extracted folder is removed.
+pub fn extract(zip_path: &str, p: &mut dyn Progress) -> Res<String> {
     let zp = Path::new(zip_path);
     let parent = zp.parent().ok_or("Invalid path")?;
     let stem = zp.file_stem().map(|x| x.to_string_lossy().into_owned()).ok_or("Invalid path")?;
     let mut archive = zip::ZipArchive::new(fs::File::open(zp).map_err(err)?).map_err(|e| format!("Not a valid zip file: {e}"))?;
+    let mut total = 0;
+    for i in 0..archive.len() {
+        total += archive.by_index_raw(i).map_err(err)?.size();
+    }
+    p.set_total(total);
     let dest = parent.join(unique_name(&stem, &names_in(parent)?));
     fs::create_dir(&dest).map_err(err)?;
-    if let Err(e) = archive.extract(&dest) {
+    let result = (|| -> Res<()> {
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i).map_err(err)?;
+            let Some(rel) = entry.enclosed_name() else { continue };
+            if entry.is_symlink() {
+                continue;
+            }
+            let out = dest.join(&rel);
+            if entry.is_dir() {
+                fs::create_dir_all(&out).map_err(err)?;
+                continue;
+            }
+            if let Some(dir) = out.parent() {
+                fs::create_dir_all(dir).map_err(err)?;
+            }
+            let mut f = fs::File::create(&out).map_err(err)?;
+            zip_copy(&mut entry, &mut f, &rel.to_string_lossy(), p)?;
+        }
+        Ok(())
+    })();
+    if let Err(e) = result {
         let _ = fs::remove_dir_all(&dest);
-        return Err(err(e));
+        return Err(e);
     }
     Ok(dest.to_string_lossy().into_owned())
 }
@@ -900,18 +945,53 @@ mod tests {
         fs::write(d.join("proj").join("inner").join("b.txt"), "beta").unwrap();
         fs::write(d.join("solo.txt"), "solo").unwrap();
 
-        let z1 = compress(&[s(&d.join("proj"))]).unwrap();
+        let z1 = compress(&[s(&d.join("proj"))], &mut NoProgress).unwrap();
         assert_eq!(Path::new(&z1).file_name().unwrap(), "proj.zip");
-        assert_eq!(Path::new(&compress(&[s(&d.join("proj"))]).unwrap()).file_name().unwrap(), "proj (2).zip");
-        let z2 = compress(&[s(&d.join("solo.txt")), s(&d.join("proj"))]).unwrap();
+        assert_eq!(Path::new(&compress(&[s(&d.join("proj"))], &mut NoProgress).unwrap()).file_name().unwrap(), "proj (2).zip");
+        let z2 = compress(&[s(&d.join("solo.txt")), s(&d.join("proj"))], &mut NoProgress).unwrap();
         assert_eq!(Path::new(&z2).file_name().unwrap(), "Archive.zip");
 
-        let out = extract(&z1).unwrap();
+        let out = extract(&z1, &mut NoProgress).unwrap();
         assert_eq!(Path::new(&out).file_name().unwrap(), "proj (2)");
         assert_eq!(read(&Path::new(&out).join("proj").join("inner").join("b.txt")), "beta");
-        let out2 = extract(&z2).unwrap();
+        let out2 = extract(&z2, &mut NoProgress).unwrap();
         assert_eq!(read(&Path::new(&out2).join("solo.txt")), "solo");
-        assert!(extract(&s(&d.join("solo.txt"))).is_err());
+        assert!(extract(&s(&d.join("solo.txt")), &mut NoProgress).is_err());
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn zip_progress_and_cancel() {
+        struct Totals {
+            total: u64,
+            done: u64,
+        }
+        impl Progress for Totals {
+            fn advance(&mut self, b: u64, _: &str) -> Res<()> {
+                self.done += b;
+                Ok(())
+            }
+            fn set_total(&mut self, t: u64) {
+                self.total = t;
+            }
+        }
+        let d = tmp();
+        fs::write(d.join("big.bin"), vec![3u8; 600_000]).unwrap();
+        let mut t = Totals { total: 0, done: 0 };
+        let z = compress(&[s(&d.join("big.bin"))], &mut t).unwrap();
+        assert_eq!((t.total, t.done), (600_000, 600_000));
+        let mut t = Totals { total: 0, done: 0 };
+        extract(&z, &mut t).unwrap();
+        assert_eq!((t.total, t.done), (600_000, 600_000));
+
+        // cancelling removes the partial result and leaves no stray files behind
+        let mut before: Vec<_> = names_in(&d).unwrap().into_iter().collect();
+        assert_eq!(compress(&[s(&d.join("big.bin"))], &mut CancelAfter(100_000, 0)).unwrap_err(), CANCELLED);
+        assert_eq!(extract(&z, &mut CancelAfter(100_000, 0)).unwrap_err(), CANCELLED);
+        let mut after: Vec<_> = names_in(&d).unwrap().into_iter().collect();
+        before.sort();
+        after.sort();
+        assert_eq!(before, after);
         fs::remove_dir_all(d).unwrap();
     }
     #[test]

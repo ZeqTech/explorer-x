@@ -75,6 +75,9 @@ struct OpProgress {
 }
 
 impl Progress for OpProgress {
+    fn set_total(&mut self, total: u64) {
+        self.total = Some(total);
+    }
     fn advance(&mut self, bytes: u64, current: &str) -> Res<()> {
         if self.cancel.load(Ordering::Relaxed) {
             return Err(CANCELLED.into());
@@ -238,12 +241,14 @@ async fn find_duplicates(app: AppHandle, ops: State<'_, Ops>, op_id: String, roo
     run_op(app, &ops, op_id, srcs, move |p| fs_service::find_duplicates(&root, p)).await
 }
 #[tauri::command]
-async fn compress_paths(paths: Vec<String>) -> Res<String> {
-    blocking(move || fs_service::compress(&paths)).await
+async fn compress_paths(app: AppHandle, ops: State<'_, Ops>, op_id: String, paths: Vec<String>) -> Res<String> {
+    let srcs = paths.clone();
+    run_op(app, &ops, op_id, srcs, move |p| fs_service::compress(&paths, p)).await
 }
 #[tauri::command]
-async fn extract_zip(path: String) -> Res<String> {
-    blocking(move || fs_service::extract(&path)).await
+async fn extract_zip(app: AppHandle, ops: State<'_, Ops>, op_id: String, path: String) -> Res<String> {
+    let srcs = vec![path.clone()];
+    run_op(app, &ops, op_id, srcs, move |p| fs_service::extract(&path, p)).await
 }
 
 // ---- trash --------------------------------------------------------------------
