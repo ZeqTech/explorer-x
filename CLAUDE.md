@@ -47,6 +47,13 @@ docs: explain the commit message format
 chore: update tauri to 2.12
 ```
 
+## Keeping FEATURES.md current
+
+[FEATURES.md](FEATURES.md) is the list of what the app can do. In the same commit that adds, changes or
+removes a user-facing feature, add or edit its row there (feature, how to use it, and today's date in the
+Added column; releases replace the date with a version). Use the same wording style as the existing rows.
+Changes users cannot see (refactors, tests, tooling for developers) do not need a row.
+
 ## Releasing
 
 Do not bump versions, edit `CHANGELOG.md` or create tags unless asked. When asked to cut a release, follow
