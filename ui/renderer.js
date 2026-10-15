@@ -301,12 +301,16 @@ import { el, conflictDialog, promptDialog, batchRenameDialog, duplicatesDialog, 
     section('Quick access', places.quick);
     section('This computer', places.drives);
     renderNavActive();
-    if (reload) markMissingPins();
+    markMissingPins(reload);
   }
   // Pins whose folder is gone (deleted, or a drive that is not connected) are struck through.
   // Checked after the sidebar is drawn so a slow network drive cannot hold it up.
-  async function markMissingPins() {
-    await Promise.all(state.pins.map(async (p) => {
+  const pinChecked = new Map(); // path -> when it was last looked at
+  async function markMissingPins(force) {
+    const now = Date.now();
+    const due = state.pins.filter((p) => force || !pinChecked.has(p) || now - pinChecked.get(p) > 30000);
+    await Promise.all(due.map(async (p) => {
+      pinChecked.set(p, now);
       const ok = await api.isDir(p).catch(() => false);
       if (ok) missingPins.delete(p); else missingPins.add(p);
       document.querySelectorAll('#nav div.pin').forEach((d) => {

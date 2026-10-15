@@ -22,9 +22,13 @@ Explorer X follows the workflow of Windows File Explorer: a breadcrumb address b
 
 Navigation uses back, forward and up buttons, a clickable breadcrumb bar, and typed paths (`~` works). Each tab keeps its own folder and history, and middle-clicking a folder opens it in a new tab. You can pin any folder to the sidebar from the right-click menu, and on Windows right-click the sidebar to import the folders you pinned to Quick access in File Explorer. Drag the sidebar divider to resize it. Double-click the divider to reset it.
 
+Pins can also be added by dragging a folder onto the sidebar, reordered by dragging (or with Move up and Move down), renamed, and jumped to with `Ctrl+1` to `Ctrl+9`. A pin whose folder is gone is struck through. "Copy pins as JSON" and "Paste pins from JSON" back them up or move them to another machine. The sidebar also lists your recent folders and any searches you saved with the Save button next to the search box.
+
 Files show in a details or icon view with sortable columns and an adjustable icon size. The icons are the ones your OS uses, and image files get thumbnails in icon view. The preview pane (`Alt+P`) shows text, images, audio, video or a folder summary without opening anything. The Properties dialog (`Alt+Enter`) shows size, folder totals, dates, attributes and location.
 
-Right-click menus on files, folders, empty space and the sidebar offer Open, Open in terminal, Copy path, Copy name, Duplicate, Pin, Properties, and Show in Explorer or Finder. You can cut, copy, paste, rename, create folders and files, and drag and drop (hold Ctrl or Alt to copy). When a name already exists you choose Replace, Skip or Keep both, with a "do this for all" option. Large copies and moves show a progress bar and can be cancelled.
+Right-click menus on files, folders, empty space and the sidebar offer Open, Open in terminal, Copy path, Copy name, Duplicate, Pin, Properties, and Show in Explorer or Finder. You can cut, copy, paste, rename, create folders and files, and drag and drop (hold Ctrl or Alt to copy). When a name already exists you choose Replace, Skip or Keep both, with a "do this for all" option. Large copies and moves show a progress bar and can be cancelled. Selecting several items and choosing Rename opens a batch rename dialog with find and replace, numbering and a live preview. "Compress to ZIP" and "Extract to folder" work on zip files, and "Find duplicate files here" lists identical files in a folder so you can send the extra copies to the Trash.
+
+The Split button (`Ctrl+\`) opens a second pane with its own folder. Drag files between the panes, or use "Copy to other pane" and "Move to other pane" in the right-click menu. Sorting by Size also calculates folder sizes.
 
 Deleting sends items to the Recycle Bin or Trash, and Replace sends the old item there too. Rename, create, move, copy and delete can be undone with `Ctrl+Z` and redone with `Ctrl+Y`.
 

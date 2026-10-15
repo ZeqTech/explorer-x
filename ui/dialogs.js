@@ -24,7 +24,9 @@ function show(content, { onEscape } = {}) {
   m.append(content);
   m.hidden = false;
   const onKey = (ev) => {
-    if (ev.key === 'Escape' && onEscape) { ev.preventDefault(); ev.stopPropagation(); onEscape(); }
+    if (ev.key === 'Escape' && onEscape) { ev.preventDefault(); ev.stopPropagation(); onEscape(); return; }
+    // text fields in the dialog must still receive their own keys (Enter to confirm, typing)
+    if (m.contains(ev.target) && /^(INPUT|TEXTAREA)$/.test(ev.target.tagName)) return;
     // keep typing inside a dialog from triggering file-list shortcuts
     ev.stopPropagation();
   };
