@@ -78,6 +78,35 @@ export function conflictDialog(conflicts, destName) {
   });
 }
 
+// ---- text input -----------------------------------------------------------------
+
+/**
+ * Asks for a line of text (or several lines with `multiline`). Resolves to the entered string,
+ * or null if cancelled. `validate(value)` may return an error message to keep the dialog open.
+ */
+export function promptDialog({ title, label, value = '', okText = 'OK', multiline = false, placeholder = '', validate }) {
+  return new Promise((resolve) => {
+    let close = () => {};
+    const finish = (v) => { close(); resolve(v); };
+    const input = multiline
+      ? el('textarea', { className: 'field', rows: 8, value, placeholder, spellcheck: false })
+      : el('input', { className: 'field', type: 'text', value, placeholder, spellcheck: false });
+    const error = el('p', { className: 'error' }, '');
+    const submit = () => {
+      const msg = validate ? validate(input.value) : null;
+      if (msg) { error.textContent = msg; return; }
+      finish(input.value);
+    };
+    input.onkeydown = (ev) => { if (ev.key === 'Enter' && (!multiline || ev.ctrlKey)) { ev.preventDefault(); submit(); } };
+    const ok = el('button', { className: 'primary', onclick: submit }, okText);
+    const body = el('div', { className: 'dlg' },
+      el('h3', {}, title), label ? el('p', { className: 'muted' }, label) : null, input, error,
+      el('div', { className: 'btns' }, el('button', { onclick: () => finish(null) }, 'Cancel'), ok));
+    close = show(body, { onEscape: () => finish(null) });
+    input.focus(); input.select();
+  });
+}
+
 // ---- progress -----------------------------------------------------------------
 
 /**

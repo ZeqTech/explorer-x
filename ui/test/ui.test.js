@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { UndoStack } from '../undo.js';
-import { fmtSize, parentOf, joinPath, baseName, iconKey, plural, invertMoves, typeOf } from '../format.js';
+import { fmtSize, parentOf, joinPath, baseName, iconKey, plural, invertMoves, typeOf, parsePins } from '../format.js';
 
 test('fmtSize', () => {
   assert.equal(fmtSize(null), '');
@@ -73,4 +73,15 @@ test('undo stack: history is capped', async () => {
   for (let i = 0; i < 5; i++) s.push({ label: String(i), undo: async () => {}, redo: async () => {} });
   assert.equal(s.past.length, 3);
   assert.equal(s.past[0].label, '2');
+});
+
+
+test('parsePins accepts JSON, arrays and plain path lists', () => {
+  assert.deepEqual(parsePins('{"pins":[{"path":"/a","name":"A"},"/b"]}'), [{ path: '/a', name: 'A' }, { path: '/b' }]);
+  assert.deepEqual(parsePins('["/x","/x","/y"]'), [{ path: '/x' }, { path: '/y' }]);
+  assert.deepEqual(parsePins('"/one"\n\n/two\n'), [{ path: '/one' }, { path: '/two' }]);
+  assert.throws(() => parsePins(''), /Nothing/);
+  assert.throws(() => parsePins('{oops'), /valid JSON/);
+  assert.throws(() => parsePins('{"a":1}'), /list of pins/);
+  assert.throws(() => parsePins('[1, null]'), /No folder paths/);
 });

@@ -52,3 +52,32 @@ export function plural(n, word) {
 export function invertMoves(moves) {
   return moves.map((m) => ({ from: m.to, to: m.from })).reverse();
 }
+
+/**
+ * Reads pins from pasted text: {"pins": [...]}, a bare array, or one path per line. Each pin is a
+ * path string or { path, name }. Returns [{ path, name? }] with duplicates removed; throws a
+ * readable Error when nothing usable is found.
+ */
+export function parsePins(text) {
+  const t = String(text || '').trim();
+  if (!t) throw new Error('Nothing to import.');
+  let list;
+  if (/^[[{]/.test(t)) {
+    let data;
+    try { data = JSON.parse(t); } catch { throw new Error('That is not valid JSON.'); }
+    list = Array.isArray(data) ? data : data && data.pins;
+    if (!Array.isArray(list)) throw new Error('Expected a list of pins.');
+  } else {
+    list = t.split(/\r?\n/);
+  }
+  const seen = new Set(), out = [];
+  for (const item of list) {
+    const path = String(typeof item === 'string' ? item : item && item.path || '').trim().replace(/^"(.*)"$/, '$1');
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    const name = item && typeof item === 'object' && typeof item.name === 'string' ? item.name.trim() : '';
+    out.push(name ? { path, name } : { path });
+  }
+  if (!out.length) throw new Error('No folder paths found.');
+  return out;
+}

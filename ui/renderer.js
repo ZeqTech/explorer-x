@@ -1,6 +1,6 @@
-import { iconKey, fmtSize, fmtDate, fmtDateTime, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves } from './format.js';
+import { iconKey, fmtSize, fmtDate, fmtDateTime, typeOf, parentOf as parentOfSep, joinPath as joinPathSep, baseName, plural, invertMoves, parsePins } from './format.js';
 import { UndoStack } from './undo.js';
-import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDialog, dialogOpen } from './dialogs.js';
+import { el, conflictDialog, promptDialog, progressDialog, propertiesDialog, multiPropertiesDialog, dialogOpen } from './dialogs.js';
 
 (() => {
   const api = window.fsapi;
@@ -8,11 +8,11 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
   const state = {
     cwd: null, history: [], hi: -1, entries: [], sel: new Set(), anchor: null,
     sortKey: 'name', sortDir: 1, view: 'details', showHidden: false, preview: false, cut: new Set(),
-    mac: false, sep: '/', searchMode: false, pins: [], icon: 64, navw: 230,
+    mac: false, sep: '/', searchMode: false, pins: [], pinNames: {}, icon: 64, navw: 230,
   };
 
   // Per-user preferences, persisted in localStorage (best effort).
-  const PREF_KEYS = ['pins', 'icon', 'navw', 'view', 'sortKey', 'sortDir', 'showHidden', 'preview'];
+  const PREF_KEYS = ['pins', 'pinNames', 'icon', 'navw', 'view', 'sortKey', 'sortDir', 'showHidden', 'preview'];
   const savePrefs = () => {
     try { localStorage.setItem('explorerx', JSON.stringify(Object.fromEntries(PREF_KEYS.map((k) => [k, state[k]])))); } catch { /* ignore */ }
   };
@@ -200,20 +200,25 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
     $('up').disabled = !parentOf(state.cwd) || parentOf(state.cwd) === state.cwd;
   }
 
+  const pinLabel = (p) => state.pinNames[p] || baseName(p) || p;
+
   async function renderNav() {
     const nav = $('nav'); nav.textContent = '';
-    const importMenu = (ev) => {
-      if (!isWindows()) return;
+    const pinsMenu = (ev) => {
       ev.preventDefault(); ev.stopPropagation();
-      showCustomMenu(ev.clientX, ev.clientY, [['Import pins from File Explorer', guard(importPins)]]);
+      showCustomMenu(ev.clientX, ev.clientY, [
+        ['Import pins from File Explorer', guard(importPins), isWindows()],
+        ['Copy pins as JSON', guard(exportPins), state.pins.length > 0],
+        ['Paste pins from JSON…', guard(importPinsJson)],
+      ]);
     };
-    nav.oncontextmenu = importMenu;
+    nav.oncontextmenu = pinsMenu;
     const section = (title, items, pinned) => {
       const h = document.createElement('h4'); h.textContent = title; nav.appendChild(h);
-      h.oncontextmenu = importMenu;
-      for (const it of items) {
+      h.oncontextmenu = pinsMenu;
+      items.forEach((it, idx) => {
         const d = document.createElement('div'); d.textContent = it.name; d.title = it.path; d.dataset.path = it.path;
-        if (pinned) d.classList.add('pin');
+        if (pinned) { d.classList.add('pin'); if (idx < 9) d.title = it.path + '  (' + (state.mac ? '⌘' : 'Ctrl+') + (idx + 1) + ')'; }
         d.oncontextmenu = (ev) => {
           ev.preventDefault(); ev.stopPropagation();
           showCustomMenu(ev.clientX, ev.clientY, [
@@ -225,23 +230,40 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
             null,
             [state.pins.includes(it.path) ? 'Unpin from sidebar' : 'Pin to sidebar', () => togglePin(it.path)],
             ...(pinned ? [
+              ['Rename pin…', guard(() => renamePin(it.path))],
+              ['Reset pin name', guard(() => setPinName(it.path, '')), !!state.pinNames[it.path]],
               ['Move up', () => movePin(it.path, -1), state.pins.indexOf(it.path) > 0],
               ['Move down', () => movePin(it.path, 1), state.pins.indexOf(it.path) < state.pins.length - 1],
             ] : []),
-            ...(isWindows() ? [['Import pins from File Explorer', guard(importPins)]] : []),
           ]);
         };
-        d.onclick = () => go(it.path);
+        d.onclick = () => {
+          if (d.classList.contains('missing')) { toast('Folder not found: ' + it.path); return; }
+          go(it.path);
+        };
         d.ondragover = (ev) => ev.preventDefault();
-        d.ondrop = guard(async (ev) => { ev.preventDefault(); await dropOnto(it.path, ev); });
+        d.ondrop = guard(async (ev) => { ev.preventDefault(); ev.stopPropagation(); await dropOnto(it.path, ev); });
         if (pinned) wirePinReorder(d, it.path);
         nav.appendChild(d);
-      }
+      });
     };
-    if (state.pins.length) section('Pinned', state.pins.map((p) => ({ name: p.split(/[\\/]/).filter(Boolean).pop() || p, path: p })), true);
+    if (state.pins.length) section('Pinned', state.pins.map((p) => ({ name: pinLabel(p), path: p })), true);
     section('Quick access', await api.quickAccess());
     section('This computer', await api.drives());
     renderNavActive();
+    markMissingPins();
+  }
+  // Pins whose folder is gone (deleted, or a drive that is not connected) are struck through.
+  // Checked after the sidebar is drawn so a slow network drive cannot hold it up.
+  async function markMissingPins() {
+    await Promise.all(state.pins.map(async (p) => {
+      const ok = await api.isDir(p).catch(() => false);
+      document.querySelectorAll('#nav div.pin').forEach((d) => {
+        if (d.dataset.path !== p) return;
+        d.classList.toggle('missing', !ok);
+        if (!ok) d.title = 'Folder not found: ' + p;
+      });
+    }));
   }
   function renderNavActive() {
     document.querySelectorAll('#nav div').forEach((d) => d.classList.toggle('active', d.dataset.path === state.cwd));
@@ -260,7 +282,7 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
     };
     d.ondragleave = () => d.classList.remove('drop-before', 'drop-after');
     d.ondrop = guard(async (ev) => {
-      ev.preventDefault();
+      ev.preventDefault(); ev.stopPropagation();
       if (dragPin) {
         const from = dragPin, after = ev.offsetY > d.clientHeight / 2;
         dragPin = null; clearPinMarks();
@@ -293,8 +315,39 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
   }
   async function togglePin(p) {
     const i = state.pins.indexOf(p);
-    if (i >= 0) state.pins.splice(i, 1); else state.pins.push(p);
+    if (i >= 0) { state.pins.splice(i, 1); delete state.pinNames[p]; } else state.pins.push(p);
     savePrefs(); await renderNav();
+  }
+  async function setPinName(p, name) {
+    name = name.trim();
+    if (!name || name === baseName(p)) delete state.pinNames[p]; else state.pinNames[p] = name;
+    savePrefs(); await renderNav();
+  }
+  async function renamePin(p) {
+    const name = await promptDialog({ title: 'Rename pin', label: p, value: pinLabel(p), okText: 'Rename' });
+    if (name != null) await setPinName(p, name);
+  }
+  // Pins travel as JSON through the clipboard (there is no file picker in the app).
+  const exportPins = async () => {
+    const list = state.pins.map((path) => (state.pinNames[path] ? { path, name: state.pinNames[path] } : { path }));
+    await api.copyText(JSON.stringify({ pins: list }, null, 2));
+    toast('Copied ' + plural(list.length, 'pin') + ' as JSON');
+  };
+  async function importPinsJson() {
+    let parsed = [];
+    const text = await promptDialog({
+      title: 'Paste pins', label: 'Paste JSON copied with “Copy pins as JSON” (or a list of folder paths).',
+      multiline: true, okText: 'Import',
+      validate: (t) => { try { parsed = parsePins(t); return null; } catch (e) { return e.message; } },
+    });
+    if (text == null) return;
+    let added = 0;
+    for (const { path, name } of parsed) {
+      if (!state.pins.includes(path)) { state.pins.push(path); added++; }
+      if (name) state.pinNames[path] = name;
+    }
+    savePrefs(); await renderNav();
+    toast(added ? 'Imported ' + plural(added, 'pin') : 'Those pins were already in the sidebar');
   }
 
   // ---- rendering --------------------------------------------------------
@@ -633,6 +686,7 @@ import { el, conflictDialog, progressDialog, propertiesDialog, multiPropertiesDi
     const mod = state.mac ? ev.metaKey : ev.ctrlKey, k = ev.key.toLowerCase();
     if (ev.altKey && k === 'p') { ev.preventDefault(); togglePreview(); }
     else if ((ev.altKey && ev.key === 'Enter') || (state.mac && ev.metaKey && k === 'i')) { ev.preventDefault(); doProperties(); }
+    else if (mod && /^[1-9]$/.test(ev.key) && state.pins[+ev.key - 1]) { ev.preventDefault(); go(state.pins[+ev.key - 1]); }
     else if (mod && k === 't') { ev.preventDefault(); newTab(); }
     else if (ev.ctrlKey && k === 'w') { ev.preventDefault(); closeTab(activeTab); }
     else if (ev.ctrlKey && ev.key === 'Tab') { ev.preventDefault(); cycleTab(ev.shiftKey ? -1 : 1); }
